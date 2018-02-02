@@ -31,7 +31,7 @@ func (compressor *HuffmanCompressor) Write(input []byte) (int, error) {
 
 // Finalize adds a terminator value and returns the full compressed value.
 func (compressor *HuffmanCompressor) Finalize() error {
-	return compressor.writer.Finalize(0xff)
+	return compressor.writer.Pad(0xff)
 }
 
 // This is a node in the reverse mapping tree.  We use 4-bit chunks because those result in at most a single emission of a character.

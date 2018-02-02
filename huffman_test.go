@@ -1,6 +1,7 @@
 package minhq_test
 
 import (
+	"bytes"
 	"encoding/hex"
 	"testing"
 
@@ -28,13 +29,19 @@ var tests = []struct {
 
 func TestHuffmanCompress(t *testing.T) {
 	for _, v := range tests {
-		var compressor minhq.HuffmanCompressor
-		assert.Nil(t, compressor.Add([]byte(v.text)))
-		compressed, err := compressor.Finalize()
+		var buffer bytes.Buffer
+		compressor := minhq.NewHuffmanCompressor(&buffer)
+
+		n, err := compressor.Write([]byte(v.text))
 		assert.Nil(t, err)
+		assert.Equal(t, len(v.text), n)
+		err = compressor.Finalize()
+		assert.Nil(t, err)
+
 		expected, err := hex.DecodeString(v.hpack)
 		assert.Nil(t, err)
-		assert.Equal(t, compressed, expected)
+
+		assert.Equal(t, expected, buffer.Bytes())
 	}
 }
 

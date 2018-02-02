@@ -3,24 +3,54 @@ package minhq
 import (
 	"bytes"
 	"errors"
+	"io"
 )
 
 // TODO: implement these as io.Reader/io.Writer
 
 // HuffmanCompressor is a progressive compressor for Huffman-encoded data.
 type HuffmanCompressor struct {
+	writer    io.ByteWriter
 	saved     byte
 	savedBits byte
-	buffer    bytes.Buffer
 }
 
+type simpleByteWriter struct {
+	writer io.Writer
+}
+
+func (sbw simpleByteWriter) WriteByte(c byte) error {
+	n, err := sbw.writer.Write([]byte{c})
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return io.ErrShortWrite
+	}
+	return nil
+}
+
+func makeByteWriter(writer io.Writer) io.ByteWriter {
+	bw, ok := writer.(io.ByteWriter)
+	if ok {
+		return bw
+	}
+	return simpleByteWriter{writer}
+}
+
+// NewHuffmanCompressor wraps the underlying io.Writer.
+func NewHuffmanCompressor(writer io.Writer) *HuffmanCompressor {
+	return &HuffmanCompressor{makeByteWriter(writer), 0, 0}
+}
+
+// This writes out the next codepoint.  This fails if the Writer blocks.
 func (compressor *HuffmanCompressor) addEntry(entry hpackEntry) error {
 	b := entry.len + compressor.savedBits
 	v := compressor.saved
 	for b >= 8 {
 		b -= 8
 		v |= byte((entry.val >> b) & 0xff)
-		err := compressor.buffer.WriteByte(v)
+		err := compressor.writer.WriteByte(v)
 		if err != nil {
 			return err
 		}
@@ -32,30 +62,25 @@ func (compressor *HuffmanCompressor) addEntry(entry hpackEntry) error {
 }
 
 // Add compresses a string using the Huffman table.  Strings are provided as byte slices.
-func (compressor *HuffmanCompressor) Add(input []byte) error {
-	for _, c := range input {
+func (compressor *HuffmanCompressor) Write(input []byte) (int, error) {
+	for i, c := range input {
 		err := compressor.addEntry(hpackTable[c])
+		if err != nil {
+			return i, err
+		}
+	}
+	return len(input), nil
+}
+
+// Finalize adds a terminator value and returns the full compressed value.
+func (compressor *HuffmanCompressor) Finalize() error {
+	if compressor.savedBits > 0 {
+		err := compressor.writer.WriteByte(compressor.saved | (0xff >> compressor.savedBits))
 		if err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// Bytes retrieves a slice of the current compressed state.  This state might contain partially compressed values.
-func (compressor *HuffmanCompressor) Bytes() []byte {
-	return compressor.buffer.Bytes()
-}
-
-// Finalize adds a terminator value and returns the full compressed value.
-func (compressor *HuffmanCompressor) Finalize() ([]byte, error) {
-	if compressor.savedBits > 0 {
-		err := compressor.buffer.WriteByte(compressor.saved | (0xff >> compressor.savedBits))
-		if err != nil {
-			return nil, err
-		}
-	}
-	return compressor.Bytes(), nil
 }
 
 // This is a node in the reverse mapping tree.  We use 4-bit chunks because those result in at most a single emission of a character.

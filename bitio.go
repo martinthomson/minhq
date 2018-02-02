@@ -144,8 +144,8 @@ type BitReader struct {
 }
 
 // NewBitReader makes a new BitWriter.
-func NewBitReader(reader io.Reader) BitReader {
-	return BitReader{makeByteReader(reader), 0, 0}
+func NewBitReader(reader io.Reader) *BitReader {
+	return &BitReader{makeByteReader(reader), 0, 0}
 }
 
 // ReadBit reads a single bit.

@@ -93,7 +93,7 @@ type HuffmanDecompressor struct {
 // NewHuffmanDecompressor makes a new decompressor, which implements io.Reader.
 func NewHuffmanDecompressor(reader io.Reader) *HuffmanDecompressor {
 	initDecompressorTree()
-	return &HuffmanDecompressor{NewBitReader(reader), decompressorTree}
+	return &HuffmanDecompressor{*NewBitReader(reader), decompressorTree}
 }
 
 // Add bytes of input

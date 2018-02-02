@@ -56,6 +56,7 @@ func (bbw *blockingByteWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// This test is invalid.
 func TestBlockingWrite(t *testing.T) {
 	var buf bytes.Buffer
 	writer := minhq.NewBitWriter(&blockingByteWriter{&buf, 1})

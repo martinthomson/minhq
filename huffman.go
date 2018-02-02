@@ -5,53 +5,6 @@ import (
 	"io"
 )
 
-type simpleByteWriter struct {
-	writer io.Writer
-}
-
-func (sbw simpleByteWriter) WriteByte(c byte) error {
-	n, err := sbw.writer.Write([]byte{c})
-	if err != nil {
-		return err
-	}
-	if n == 0 {
-		return io.ErrShortWrite
-	}
-	return nil
-}
-
-func makeByteWriter(writer io.Writer) io.ByteWriter {
-	bw, ok := writer.(io.ByteWriter)
-	if ok {
-		return bw
-	}
-	return simpleByteWriter{writer}
-}
-
-type simpleByteReader struct {
-	reader io.Reader
-}
-
-func (sbr simpleByteReader) ReadByte() (byte, error) {
-	buf := make([]byte, 1)
-	n, err := sbr.reader.Read(buf)
-	if err != nil {
-		return 0, err
-	}
-	if n != 1 {
-		return 0, io.ErrNoProgress
-	}
-	return buf[0], nil
-}
-
-func makeByteReader(reader io.Reader) io.ByteReader {
-	br, ok := reader.(io.ByteReader)
-	if ok {
-		return br
-	}
-	return simpleByteReader{reader}
-}
-
 // HuffmanCompressor is a progressive compressor for Huffman-encoded data.
 type HuffmanCompressor struct {
 	writer    io.ByteWriter

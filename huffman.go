@@ -7,38 +7,21 @@ import (
 
 // HuffmanCompressor is a progressive compressor for Huffman-encoded data.
 type HuffmanCompressor struct {
-	writer    io.ByteWriter
+	writer    BitWriter
 	saved     byte
 	savedBits byte
 }
 
 // NewHuffmanCompressor wraps the underlying io.Writer.
 func NewHuffmanCompressor(writer io.Writer) *HuffmanCompressor {
-	return &HuffmanCompressor{makeByteWriter(writer), 0, 0}
-}
-
-// This writes out the next codepoint.  This fails if the Writer blocks.
-func (compressor *HuffmanCompressor) addEntry(entry hpackEntry) error {
-	b := entry.len + compressor.savedBits
-	v := compressor.saved
-	for b >= 8 {
-		b -= 8
-		v |= byte((entry.val >> b) & 0xff)
-		err := compressor.writer.WriteByte(v)
-		if err != nil {
-			return err
-		}
-		v = 0
-	}
-	compressor.saved = v | byte(entry.val<<(8-b))
-	compressor.savedBits = b
-	return nil
+	return &HuffmanCompressor{NewBitWriter(writer), 0, 0}
 }
 
 // Add compresses a string using the Huffman table.  Strings are provided as byte slices.
 func (compressor *HuffmanCompressor) Write(input []byte) (int, error) {
 	for i, c := range input {
-		err := compressor.addEntry(hpackTable[c])
+		entry := hpackTable[c]
+		err := compressor.writer.WriteBits(uint64(entry.val), entry.len)
 		if err != nil {
 			return i, err
 		}
@@ -48,13 +31,7 @@ func (compressor *HuffmanCompressor) Write(input []byte) (int, error) {
 
 // Finalize adds a terminator value and returns the full compressed value.
 func (compressor *HuffmanCompressor) Finalize() error {
-	if compressor.savedBits > 0 {
-		err := compressor.writer.WriteByte(compressor.saved | (0xff >> compressor.savedBits))
-		if err != nil {
-			return err
-		}
-	}
-	return nil
+	return compressor.writer.Finalize(0xff)
 }
 
 // This is a node in the reverse mapping tree.  We use 4-bit chunks because those result in at most a single emission of a character.

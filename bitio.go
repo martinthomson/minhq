@@ -28,35 +28,16 @@ func makeByteWriter(writer io.Writer) io.ByteWriter {
 	return simpleByteWriter{writer}
 }
 
-type simpleByteReader struct {
-	reader io.Reader
-}
-
-func (sbr simpleByteReader) ReadByte() (byte, error) {
-	buf := make([]byte, 1)
-	n, err := sbr.reader.Read(buf)
-	if err != nil {
-		return 0, err
-	}
-	if n != 1 {
-		return 0, io.ErrNoProgress
-	}
-	return buf[0], nil
-}
-
-func makeByteReader(reader io.Reader) io.ByteReader {
-	br, ok := reader.(io.ByteReader)
-	if ok {
-		return br
-	}
-	return simpleByteReader{reader}
-}
-
 // BitWriter is used to write individual bits.
 type BitWriter struct {
 	writer    io.ByteWriter
 	saved     byte
 	savedBits byte
+}
+
+// NewBitWriter makes a new BitWriter.
+func NewBitWriter(writer io.Writer) BitWriter {
+	return BitWriter{makeByteWriter(writer), 0, 0}
 }
 
 // WriteBits writes up to 64 bits.
@@ -94,4 +75,28 @@ func (bw *BitWriter) Finalize(pad byte) error {
 		}
 	}
 	return nil
+}
+
+type simpleByteReader struct {
+	reader io.Reader
+}
+
+func (sbr simpleByteReader) ReadByte() (byte, error) {
+	buf := make([]byte, 1)
+	n, err := sbr.reader.Read(buf)
+	if err != nil {
+		return 0, err
+	}
+	if n != 1 {
+		return 0, io.ErrNoProgress
+	}
+	return buf[0], nil
+}
+
+func makeByteReader(reader io.Reader) io.ByteReader {
+	br, ok := reader.(io.ByteReader)
+	if ok {
+		return br
+	}
+	return simpleByteReader{reader}
 }

@@ -86,55 +86,33 @@ func initDecompressorTree() {
 
 // HuffmanDecompressor is the opposite of huffmanCompressor
 type HuffmanDecompressor struct {
-	reader io.ByteReader
+	reader BitReader
 	cursor *node
-
-	// Any overflow from decompression (see Read).  We only ever need to save
-	// one octet because one octet of input expands to at most 2 octets.
-	overflow byte
 }
-
-// 0 is a safe sentinel to use for overflow because it encodes to 13 bits.
-const invalidOverflow byte = 0
 
 // NewHuffmanDecompressor makes a new decompressor, which implements io.Reader.
 func NewHuffmanDecompressor(reader io.Reader) *HuffmanDecompressor {
 	initDecompressorTree()
-	return &HuffmanDecompressor{makeByteReader(reader), decompressorTree, invalidOverflow}
+	return &HuffmanDecompressor{NewBitReader(reader), decompressorTree}
 }
 
 // Add bytes of input
 func (decompressor *HuffmanDecompressor) Read(p []byte) (int, error) {
 	i := 0
-	if decompressor.overflow != invalidOverflow {
-		p[i] = decompressor.overflow
-		i++
-		decompressor.overflow = invalidOverflow
-	}
 	for i < len(p) {
-		v, err := decompressor.reader.ReadByte()
+		b, err := decompressor.reader.ReadBit()
 		if err != nil {
 			return i, err
 		}
 
-		j := byte(8)
-		for j > 0 {
-			j--
-			decompressor.cursor = decompressor.cursor.next[(v>>j)&1]
-			if decompressor.cursor == nil {
-				return i, errors.New("invalid Huffman coding")
-			}
-			if decompressor.cursor.leaf {
-				// HPACK can produce two octets of output from a single octet of input,
-				// if there isn't enough room to return that octet, save it in overflow.
-				if i >= len(p) {
-					decompressor.overflow = decompressor.cursor.val
-				} else {
-					p[i] = decompressor.cursor.val
-					i++
-				}
-				decompressor.cursor = decompressorTree
-			}
+		decompressor.cursor = decompressor.cursor.next[b]
+		if decompressor.cursor == nil {
+			return i, errors.New("invalid Huffman coding")
+		}
+		if decompressor.cursor.leaf {
+			p[i] = decompressor.cursor.val
+			i++
+			decompressor.cursor = decompressorTree
 		}
 	}
 	return i, nil

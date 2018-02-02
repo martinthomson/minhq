@@ -1,19 +1,9 @@
 package minhq
 
 import (
-	"bytes"
 	"errors"
 	"io"
 )
-
-// TODO: implement these as io.Reader/io.Writer
-
-// HuffmanCompressor is a progressive compressor for Huffman-encoded data.
-type HuffmanCompressor struct {
-	writer    io.ByteWriter
-	saved     byte
-	savedBits byte
-}
 
 type simpleByteWriter struct {
 	writer io.Writer
@@ -36,6 +26,37 @@ func makeByteWriter(writer io.Writer) io.ByteWriter {
 		return bw
 	}
 	return simpleByteWriter{writer}
+}
+
+type simpleByteReader struct {
+	reader io.Reader
+}
+
+func (sbr simpleByteReader) ReadByte() (byte, error) {
+	buf := make([]byte, 1)
+	n, err := sbr.reader.Read(buf)
+	if err != nil {
+		return 0, err
+	}
+	if n != 1 {
+		return 0, io.ErrNoProgress
+	}
+	return buf[0], nil
+}
+
+func makeByteReader(reader io.Reader) io.ByteReader {
+	br, ok := reader.(io.ByteReader)
+	if ok {
+		return br
+	}
+	return simpleByteReader{reader}
+}
+
+// HuffmanCompressor is a progressive compressor for Huffman-encoded data.
+type HuffmanCompressor struct {
+	writer    io.ByteWriter
+	saved     byte
+	savedBits byte
 }
 
 // NewHuffmanCompressor wraps the underlying io.Writer.
@@ -133,46 +154,58 @@ func initDecompressorTree() {
 	}
 }
 
-// HuffmanDecompressor is the opposite of HuffmanCompressor
+// HuffmanDecompressor is the opposite of huffmanCompressor
 type HuffmanDecompressor struct {
+	reader io.ByteReader
 	cursor *node
-	buffer bytes.Buffer
+
+	// Any overflow from decompression (see Read).  We only ever need to save
+	// one octet because one octet of input expands to at most 2 octets.
+	overflow byte
+}
+
+// 0 is a safe sentinel to use for overflow because it encodes to 13 bits.
+const invalidOverflow byte = 0
+
+// NewHuffmanDecompressor makes a new decompressor, which implements io.Reader.
+func NewHuffmanDecompressor(reader io.Reader) *HuffmanDecompressor {
+	initDecompressorTree()
+	return &HuffmanDecompressor{makeByteReader(reader), decompressorTree, invalidOverflow}
 }
 
 // Add bytes of input
-func (decompressor *HuffmanDecompressor) Add(input []byte) error {
-	if decompressor.cursor == nil {
-		initDecompressorTree()
-		decompressor.cursor = decompressorTree
+func (decompressor *HuffmanDecompressor) Read(p []byte) (int, error) {
+	i := 0
+	if decompressor.overflow != invalidOverflow {
+		p[i] = decompressor.overflow
+		i++
+		decompressor.overflow = invalidOverflow
 	}
-	for _, v := range input {
-		i := uint8(8)
-		for i > 0 {
-			i--
-			decompressor.cursor = decompressor.cursor.next[(v>>i)&1]
+	for i < len(p) {
+		v, err := decompressor.reader.ReadByte()
+		if err != nil {
+			return i, err
+		}
+
+		j := byte(8)
+		for j > 0 {
+			j--
+			decompressor.cursor = decompressor.cursor.next[(v>>j)&1]
 			if decompressor.cursor == nil {
-				decompressor.cursor = decompressorTree
-				return errors.New("invalid Huffman coding")
+				return i, errors.New("invalid Huffman coding")
 			}
 			if decompressor.cursor.leaf {
-				err := decompressor.buffer.WriteByte(decompressor.cursor.val)
-				if err != nil {
-					return err
+				// HPACK can produce two octets of output from a single octet of input,
+				// if there isn't enough room to return that octet, save it in overflow.
+				if i >= len(p) {
+					decompressor.overflow = decompressor.cursor.val
+				} else {
+					p[i] = decompressor.cursor.val
+					i++
 				}
 				decompressor.cursor = decompressorTree
 			}
 		}
 	}
-	return nil
-}
-
-// Bytes retrieves a slice of the current compressed state.  This state contains only fully compressed values.
-func (decompressor *HuffmanDecompressor) Bytes() []byte {
-	return decompressor.buffer.Bytes()
-}
-
-// Finalize just calls Bytes.
-func (decompressor *HuffmanDecompressor) Finalize() ([]byte, error) {
-	decompressor.cursor = nil
-	return decompressor.Bytes(), nil
+	return i, nil
 }

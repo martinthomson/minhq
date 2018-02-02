@@ -47,12 +47,15 @@ func TestHuffmanCompress(t *testing.T) {
 
 func TestHuffmanDecompress(t *testing.T) {
 	for _, v := range tests {
-		var decompressor minhq.HuffmanDecompressor
 		compressed, err := hex.DecodeString(v.hpack)
 		assert.Nil(t, err)
-		assert.Nil(t, decompressor.Add(compressed))
-		decompressed, err := decompressor.Finalize()
-		assert.Nil(t, err)
-		assert.Equal(t, decompressed, []byte(v.text))
+		reader := bytes.NewReader(compressed)
+		decompressor := minhq.NewHuffmanDecompressor(reader)
+
+		decompressed := make([]byte, len(compressed)*2)
+		n, _ := decompressor.Read(decompressed)
+		assert.True(t, n < len(decompressed))
+
+		assert.Equal(t, decompressed[0:n], []byte(v.text))
 	}
 }

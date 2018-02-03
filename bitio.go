@@ -94,16 +94,16 @@ func (bw *BitWriter) WriteByte(c byte) error {
 
 // Write so that we can claim to implement the io.Writer interface.
 func (bw *BitWriter) Write(p []byte) (int, error) {
-	if bw.savedBits > 0 {
-		for i, b := range p {
-			err := bw.WriteByte(b)
-			if err != nil {
-				return i, err
-			}
-		}
-		return len(p), nil
+	if bw.savedBits == 0 {
+		return bw.writer.Write(p)
 	}
-	return bw.writer.Write(p)
+	for i, b := range p {
+		err := bw.WriteByte(b)
+		if err != nil {
+			return i, err
+		}
+	}
+	return len(p), nil
 }
 
 // Pad pads out any partially filled octet with the high bits of pad.
@@ -152,6 +152,7 @@ func (br *BitReader) readByteInternal() (byte, error) {
 	return buf[0], nil
 }
 
+// Read the next octet and update the saved state.
 func (br *BitReader) readNext() error {
 	b, err := br.readByteInternal()
 	if err != nil {
@@ -187,12 +188,10 @@ func (br *BitReader) ReadBits(count byte) (uint64, error) {
 	// reading a byte.  That way, if there is an error, those values are accurate.
 	// However, after we use it, br.saved can contain junk above br.savedBits.
 	for br.savedBits+8 <= count {
-		b, err := br.readByteInternal()
+		err := br.readNext()
 		if err != nil {
 			return 0, err
 		}
-		br.saved = (br.saved << 8) | uint64(b)
-		br.savedBits += 8
 	}
 	if br.savedBits >= count {
 		br.savedBits -= count
@@ -201,6 +200,7 @@ func (br *BitReader) ReadBits(count byte) (uint64, error) {
 	result := br.saved & (^uint64(0) >> (64 - br.savedBits))
 	remainder := count - br.savedBits
 
+	// Can't use readNext() because br.saved might overflow.
 	b, err := br.readByteInternal()
 	if err != nil {
 		return 0, err
@@ -208,4 +208,28 @@ func (br *BitReader) ReadBits(count byte) (uint64, error) {
 	br.saved = uint64(b)
 	br.savedBits = 8 - remainder
 	return (result << remainder) | (br.saved >> (8 - remainder)), nil
+}
+
+// ReadByte so that we can claim to support the io.ByteReader interface.
+func (br *BitReader) ReadByte() (byte, error) {
+	if br.savedBits == 0 {
+		return br.readByteInternal()
+	}
+	b, err := br.ReadBits(8)
+	return byte(b), err
+}
+
+// Read so that we can claim to support the io.Reader interface.
+func (br *BitReader) Read(p []byte) (int, error) {
+	if br.savedBits == 0 {
+		return br.reader.Read(p)
+	}
+	for i := range p {
+		b, err := br.ReadByte()
+		if err != nil {
+			return i, err
+		}
+		p[i] = b
+	}
+	return len(p), nil
 }

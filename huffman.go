@@ -96,7 +96,7 @@ func NewHuffmanDecompressor(reader io.Reader) *HuffmanDecompressor {
 	return &HuffmanDecompressor{*NewBitReader(reader), decompressorTree}
 }
 
-// Add bytes of input
+// Read bytes of input and decode.
 func (decompressor *HuffmanDecompressor) Read(p []byte) (int, error) {
 	i := 0
 	for i < len(p) {

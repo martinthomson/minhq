@@ -34,3 +34,19 @@ func (hr *HpackReader) ReadInt(prefix byte) (uint64, error) {
 	}
 	return v, nil
 }
+
+/*
+func (hr *HpackReader) ReadString() (string, error) {
+	huffman, err := hr.ReadBit()
+	if err != nil {
+		return "", nil
+	}
+	len, err := hr.ReadInt(7)
+	if err != nil {
+		return "", nil
+	}
+	buf := make([]byte, len)
+	n, err := io.ReadFull(hr, buf)
+	s := ""
+	return s, nil
+}*/

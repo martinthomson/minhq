@@ -5,12 +5,25 @@ import (
 	"io"
 )
 
-type simpleByteWriter struct {
-	writer io.Writer
+// BitWriter is used to write individual bits.
+type BitWriter struct {
+	writer    io.Writer
+	saved     uint64
+	savedBits byte
 }
 
-func (sbw simpleByteWriter) WriteByte(c byte) error {
-	n, err := sbw.writer.Write([]byte{c})
+// NewBitWriter makes a new BitWriter.
+func NewBitWriter(writer io.Writer) BitWriter {
+	return BitWriter{writer, 0, 0}
+}
+
+// Writes out a byte to the underlying writer.
+func (bw *BitWriter) writeByteInternal(c byte) error {
+	byteWriter, ok := bw.writer.(io.ByteWriter)
+	if ok {
+		return byteWriter.WriteByte(c)
+	}
+	n, err := bw.writer.Write([]byte{c})
 	if err != nil {
 		return err
 	}
@@ -20,31 +33,11 @@ func (sbw simpleByteWriter) WriteByte(c byte) error {
 	return nil
 }
 
-func makeByteWriter(writer io.Writer) io.ByteWriter {
-	bw, ok := writer.(io.ByteWriter)
-	if ok {
-		return bw
-	}
-	return simpleByteWriter{writer}
-}
-
-// BitWriter is used to write individual bits.
-type BitWriter struct {
-	writer    io.ByteWriter
-	saved     uint64
-	savedBits byte
-}
-
-// NewBitWriter makes a new BitWriter.
-func NewBitWriter(writer io.Writer) BitWriter {
-	return BitWriter{makeByteWriter(writer), 0, 0}
-}
-
 // Writes out any whole octets from the saved bits.
 func (bw *BitWriter) writeSaved() error {
 	for bw.savedBits >= 8 {
 		x := byte(bw.saved >> (bw.savedBits - 8))
-		err := bw.writer.WriteByte(x)
+		err := bw.writeByteInternal(x)
 		if err != nil {
 			return err
 		}
@@ -76,7 +69,7 @@ func (bw *BitWriter) WriteBits(v uint64, count byte) error {
 	// Here we don't save anything until the first write succeeds.
 	remainder := count + bw.savedBits - 8
 	x := byte((bw.saved << (8 - bw.savedBits)) | (v >> remainder))
-	err = bw.writer.WriteByte(x)
+	err = bw.writeByteInternal(x)
 	if err != nil {
 		return err
 	}
@@ -92,6 +85,25 @@ func (bw *BitWriter) WriteBits(v uint64, count byte) error {
 // WriteBit writes a single bit.
 func (bw *BitWriter) WriteBit(bit byte) error {
 	return bw.WriteBits(uint64(bit), 1)
+}
+
+// WriteByte so that we can claim to implement the io.ByteWriter interface.
+func (bw *BitWriter) WriteByte(c byte) error {
+	return bw.WriteBits(uint64(c), 8)
+}
+
+// Write so that we can claim to implement the io.Writer interface.
+func (bw *BitWriter) Write(p []byte) (int, error) {
+	if bw.savedBits > 0 {
+		for i, b := range p {
+			err := bw.WriteByte(b)
+			if err != nil {
+				return i, err
+			}
+		}
+		return len(p), nil
+	}
+	return bw.writer.Write(p)
 }
 
 // Pad pads out any partially filled octet with the high bits of pad.
@@ -112,13 +124,25 @@ func (bw *BitWriter) Pad(pad byte) error {
 	return nil
 }
 
-type simpleByteReader struct {
-	reader io.Reader
+// BitReader reads individual bits
+type BitReader struct {
+	reader    io.Reader
+	saved     uint64
+	savedBits byte
 }
 
-func (sbr simpleByteReader) ReadByte() (byte, error) {
+// NewBitReader makes a new BitWriter.
+func NewBitReader(reader io.Reader) *BitReader {
+	return &BitReader{reader, 0, 0}
+}
+
+func (br *BitReader) readByteInternal() (byte, error) {
+	byteReader, ok := br.reader.(io.ByteReader)
+	if ok {
+		return byteReader.ReadByte()
+	}
 	buf := make([]byte, 1)
-	n, err := sbr.reader.Read(buf)
+	n, err := br.reader.Read(buf)
 	if err != nil {
 		return 0, err
 	}
@@ -128,24 +152,14 @@ func (sbr simpleByteReader) ReadByte() (byte, error) {
 	return buf[0], nil
 }
 
-func makeByteReader(reader io.Reader) io.ByteReader {
-	br, ok := reader.(io.ByteReader)
-	if ok {
-		return br
+func (br *BitReader) readNext() error {
+	b, err := br.readByteInternal()
+	if err != nil {
+		return err
 	}
-	return simpleByteReader{reader}
-}
-
-// BitReader reads individual bits
-type BitReader struct {
-	reader    io.ByteReader
-	saved     uint64
-	savedBits byte
-}
-
-// NewBitReader makes a new BitWriter.
-func NewBitReader(reader io.Reader) *BitReader {
-	return &BitReader{makeByteReader(reader), 0, 0}
+	br.saved = (br.saved << 8) | uint64(b)
+	br.savedBits += 8
+	return nil
 }
 
 // ReadBit reads a single bit.
@@ -155,13 +169,12 @@ func (br *BitReader) ReadBit() (byte, error) {
 		return byte(br.saved>>br.savedBits) & 1, nil
 	}
 
-	b, err := br.reader.ReadByte()
+	err := br.readNext()
 	if err != nil {
 		return 0, err
 	}
-	br.saved = uint64(b)
-	br.savedBits = 7
-	return b >> 7, nil
+	br.savedBits--
+	return byte(br.saved>>br.savedBits) & 1, nil
 }
 
 // ReadBits reads up to 64 bits.
@@ -174,7 +187,7 @@ func (br *BitReader) ReadBits(count byte) (uint64, error) {
 	// reading a byte.  That way, if there is an error, those values are accurate.
 	// However, after we use it, br.saved can contain junk above br.savedBits.
 	for br.savedBits+8 <= count {
-		b, err := br.reader.ReadByte()
+		b, err := br.readByteInternal()
 		if err != nil {
 			return 0, err
 		}
@@ -188,7 +201,7 @@ func (br *BitReader) ReadBits(count byte) (uint64, error) {
 	result := br.saved & (^uint64(0) >> (64 - br.savedBits))
 	remainder := count - br.savedBits
 
-	b, err := br.reader.ReadByte()
+	b, err := br.readByteInternal()
 	if err != nil {
 		return 0, err
 	}

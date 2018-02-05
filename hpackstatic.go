@@ -1,12 +1,12 @@
 package minhq
 
 type hpackStaticEntry struct {
-	index uint
+	index int
 	name  string
 	value string
 }
 
-func (hse hpackStaticEntry) Index() uint {
+func (hse hpackStaticEntry) Index() int {
 	return hse.index
 }
 

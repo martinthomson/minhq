@@ -1,12 +1,14 @@
 package minhq
 
-import "errors"
+import (
+	"errors"
+)
 
 // HpackEntry is a key-value pair for the HPACK table.
 type HpackEntry interface {
 	Name() string
 	Value() string
-	Index() uint
+	Index() int
 }
 
 // HpackTableCapacity is the type of the HPACK table capacity.
@@ -18,11 +20,11 @@ type hpackDynamicEntry struct {
 	value string
 	table *HpackTable
 	// The insert count at the time that this was added to the table.
-	inserts uint
+	inserts int
 }
 
-func (hd hpackDynamicEntry) Index() uint {
-	return hd.table.inserts - hd.inserts + uint(len(hpackStaticTable))
+func (hd hpackDynamicEntry) Index() int {
+	return hd.table.inserts - hd.inserts + len(hpackStaticTable) + 1
 }
 
 func (hd hpackDynamicEntry) Name() string {
@@ -44,21 +46,27 @@ type HpackTable struct {
 	// The amount of used capacity.
 	used HpackTableCapacity
 	// The total number of inserts thus far.
-	inserts uint
+	inserts int
 }
 
 // ErrHpackEntryNotFound indicates that a reference was made outside of the table.
 var ErrHpackEntryNotFound = errors.New("HPACK table entry not found")
 
+// Len is the number of entries in the combined table.  Note that because
+// HPACK uses a 1-based index, this is the index of the oldest dynamic entry.
+func (table HpackTable) Len() int {
+	return len(hpackStaticTable) + len(table.dynamic)
+}
+
 // Get an entry from the table.
-func (table HpackTable) Get(i int) (HpackEntry, error) {
-	if (i <= 0) || (i > len(hpackStaticTable)+len(table.dynamic)) {
-		return nil, ErrHpackEntryNotFound
+func (table HpackTable) Get(i int) HpackEntry {
+	if (i <= 0) || (i > table.Len()) {
+		return nil
 	}
 	if i <= len(hpackStaticTable) {
-		return hpackStaticTable[i], nil
+		return hpackStaticTable[i-1]
 	}
-	return table.dynamic[i-len(hpackStaticTable)], nil
+	return table.dynamic[i-len(hpackStaticTable)-1]
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.
@@ -71,24 +79,21 @@ func (table *HpackTable) evictTo(reduced HpackTableCapacity) {
 	table.dynamic = table.dynamic[0:l]
 }
 
-// Evict for a new addition.  Includes logic for entries that overflow - and
-// therefore flush - the table.
-func (table *HpackTable) evictFor(entrySize HpackTableCapacity) {
-	if entrySize > table.capacity {
-		table.dynamic = table.dynamic[0:0]
-		table.used = 0
-	} else {
-		table.evictTo(table.capacity - entrySize)
-	}
-}
-
 // Insert an entry into the table.
 func (table *HpackTable) Insert(name string, value string) HpackEntry {
 	table.inserts++
 	entry := hpackDynamicEntry{name, value, table, table.inserts}
-	table.evictFor(entry.Size())
-	table.dynamic = append(table.dynamic, &entry)
-	table.used += entry.Size()
+	if entry.Size() > table.capacity {
+		table.dynamic = table.dynamic[0:0]
+		table.used = 0
+	} else {
+		table.evictTo(table.capacity - entry.Size())
+		tmp := make([]*hpackDynamicEntry, len(table.dynamic)+1)
+		copy(tmp[1:], table.dynamic)
+		tmp[0] = &entry
+		table.dynamic = tmp
+		table.used += entry.Size()
+	}
 	return &entry
 }
 
@@ -96,4 +101,23 @@ func (table *HpackTable) Insert(name string, value string) HpackEntry {
 func (table *HpackTable) SetCapacity(capacity HpackTableCapacity) {
 	table.evictTo(capacity)
 	table.capacity = capacity
+}
+
+// Lookup looks in the table for a matching name and value. This produces two
+// return values: the first is match on both name and value, which is often nil.
+// The second is a match on name only, which might also be nil.
+func (table HpackTable) Lookup(name string, value string) (HpackEntry, HpackEntry) {
+	var nameOnly HpackEntry
+	for i := 1; i <= table.Len(); i++ {
+		entry := table.Get(i)
+		if entry.Name() == name {
+			if entry.Value() == value {
+				return entry, entry
+			}
+			if nameOnly == nil {
+				nameOnly = entry
+			}
+		}
+	}
+	return nil, nameOnly
 }

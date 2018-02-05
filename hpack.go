@@ -153,6 +153,7 @@ type Encoder struct {
 	// Track changes to capacity so that we can reflect them properly.
 	minCapacity  HpackTableCapacity
 	nextCapacity HpackTableCapacity
+	indexPrefs   map[string]bool
 }
 
 func (encoder *Encoder) writeCapacity(writer *HpackWriter, c HpackTableCapacity) error {
@@ -211,8 +212,13 @@ func (encoder Encoder) avoidIndexing(h HeaderField) bool {
 		"referer":             true,
 		"refresh":             true,
 	}
+
 	if h.Sensitive {
 		return true
+	}
+	pref, ok := encoder.indexPrefs[h.Name]
+	if ok {
+		return pref
 	}
 	_, d := dontIndex[h.Name]
 	if d {
@@ -311,4 +317,15 @@ func (encoder *Encoder) SetCapacity(c HpackTableCapacity) {
 		encoder.minCapacity = c
 	}
 	encoder.nextCapacity = c
+}
+
+// SetIndexPreference sets preferences for header fields with the given name.
+// Set to true to index, false to never index.
+func (encoder *Encoder) SetIndexPreference(name string, pref bool) {
+	encoder.indexPrefs[name] = pref
+}
+
+// ClearIndexPreference resets the preference for indexing for the named header field.
+func (encoder *Encoder) ClearIndexPreference(name string) {
+	delete(encoder.indexPrefs, name)
 }

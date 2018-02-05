@@ -13,8 +13,8 @@ type BitWriter struct {
 }
 
 // NewBitWriter makes a new BitWriter.
-func NewBitWriter(writer io.Writer) BitWriter {
-	return BitWriter{writer, 0, 0}
+func NewBitWriter(writer io.Writer) *BitWriter {
+	return &BitWriter{writer, 0, 0}
 }
 
 // Writes out a byte to the underlying writer.

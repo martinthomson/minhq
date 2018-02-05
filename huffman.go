@@ -7,7 +7,7 @@ import (
 
 // HuffmanCompressor is a progressive compressor for Huffman-encoded data.
 type HuffmanCompressor struct {
-	writer    BitWriter
+	writer    *BitWriter
 	saved     byte
 	savedBits byte
 }
@@ -86,14 +86,14 @@ func initDecompressorTree() {
 
 // HuffmanDecompressor is the opposite of huffmanCompressor
 type HuffmanDecompressor struct {
-	reader BitReader
+	reader *BitReader
 	cursor *node
 }
 
 // NewHuffmanDecompressor makes a new decompressor, which implements io.Reader.
 func NewHuffmanDecompressor(reader io.Reader) *HuffmanDecompressor {
 	initDecompressorTree()
-	return &HuffmanDecompressor{*NewBitReader(reader), decompressorTree}
+	return &HuffmanDecompressor{NewBitReader(reader), decompressorTree}
 }
 
 // Read bytes of input and decode.

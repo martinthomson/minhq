@@ -150,7 +150,7 @@ func (hw *HpackWriter) WriteStringRaw(s string, huffman HuffmanCodingChoice) err
 		if n < int64(l) {
 			return io.ErrShortWrite
 		}
-		err = compressor.Finalize()
+		err = compressor.Pad()
 		if err != nil {
 			return err
 		}

@@ -6,7 +6,7 @@ type hpackEntry struct {
 }
 
 // Table contains the raw HPACK Huffman table
-var hpackTable = []hpackEntry{
+var huffmanTable = []hpackEntry{
 	{13, 0x1ff8},
 	{23, 0x7fffd8},
 	{28, 0xfffffe2},

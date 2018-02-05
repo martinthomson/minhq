@@ -35,7 +35,7 @@ func TestHuffmanCompress(t *testing.T) {
 		n, err := compressor.Write([]byte(v.text))
 		assert.Nil(t, err)
 		assert.Equal(t, len(v.text), n)
-		err = compressor.Finalize()
+		err = compressor.Pad()
 		assert.Nil(t, err)
 
 		expected, err := hex.DecodeString(v.hpack)

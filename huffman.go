@@ -20,7 +20,7 @@ func NewHuffmanCompressor(writer io.Writer) *HuffmanCompressor {
 // Add compresses a string using the Huffman table.  Strings are provided as byte slices.
 func (compressor *HuffmanCompressor) Write(input []byte) (int, error) {
 	for i, c := range input {
-		entry := hpackTable[c]
+		entry := huffmanTable[c]
 		err := compressor.writer.WriteBits(uint64(entry.val), entry.len)
 		if err != nil {
 			return i, err
@@ -29,8 +29,8 @@ func (compressor *HuffmanCompressor) Write(input []byte) (int, error) {
 	return len(input), nil
 }
 
-// Finalize adds a terminator value and returns the full compressed value.
-func (compressor *HuffmanCompressor) Finalize() error {
+// Pad adds a terminator value and returns the full compressed value.
+func (compressor *HuffmanCompressor) Pad() error {
 	return compressor.writer.Pad(0xff)
 }
 
@@ -44,7 +44,7 @@ type node struct {
 func makeLayer(prefix uint32, prefixLen byte) *node {
 	layer := new(node)
 	found := false
-	for i, e := range hpackTable {
+	for i, e := range huffmanTable {
 		if e.len < prefixLen+1 {
 			continue
 		}

@@ -41,7 +41,8 @@ func (hd hpackDynamicEntry) Size() HpackTableCapacity {
 // HpackTable holds table entries.
 type HpackTable struct {
 	dynamic []*hpackDynamicEntry
-	// The total capacity (in HPACK bytes) of the table.  This is set by configuration.
+	// The total capacity (in HPACK bytes) of the table. This is set by
+	// configuration.
 	capacity HpackTableCapacity
 	// The amount of used capacity.
 	used HpackTableCapacity
@@ -49,10 +50,11 @@ type HpackTable struct {
 	inserts int
 }
 
-// ErrHpackEntryNotFound indicates that a reference was made outside of the table.
+// ErrHpackEntryNotFound indicates that a reference was made outside of the
+// table.
 var ErrHpackEntryNotFound = errors.New("HPACK table entry not found")
 
-// Len is the number of entries in the combined table.  Note that because
+// Len is the number of entries in the combined table. Note that because
 // HPACK uses a 1-based index, this is the index of the oldest dynamic entry.
 func (table HpackTable) Len() int {
 	return len(hpackStaticTable) + len(table.dynamic)

@@ -1,12 +1,12 @@
 package minhq
 
-type hpackEntry struct {
+type huffmanTableItem struct {
 	len uint8
 	val uint32
 }
 
 // Table contains the raw HPACK Huffman table
-var huffmanTable = []hpackEntry{
+var huffmanTable = []huffmanTableItem{
 	{13, 0x1ff8},
 	{23, 0x7fffd8},
 	{28, 0xfffffe2},

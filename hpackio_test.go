@@ -3,7 +3,6 @@ package minhq_test
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"testing"
 
 	"github.com/martinthomson/minhq"
@@ -86,20 +85,17 @@ var encodedStrings = []struct {
 
 func TestReadString(t *testing.T) {
 	for _, tc := range encodedStrings {
-		fmt.Printf("decode %s -> '%s'\n", tc.encoded, tc.value)
 		encoded, err := hex.DecodeString(tc.encoded)
 		assert.Nil(t, err)
 		reader := minhq.NewHpackReader(bytes.NewReader(encoded))
 		s, err := reader.ReadString()
 		assert.Nil(t, err)
-		fmt.Printf(" = '%s'\n", s)
 		assert.Equal(t, tc.value, s)
 	}
 }
 
 func TestWriteString(t *testing.T) {
 	for _, tc := range encodedStrings {
-		fmt.Printf("encode '%s' -> %s\n", tc.value, tc.encoded)
 		expected, err := hex.DecodeString(tc.encoded)
 		assert.Nil(t, err)
 		var huffman minhq.HuffmanCodingChoice
@@ -113,7 +109,6 @@ func TestWriteString(t *testing.T) {
 		writer := minhq.NewHpackWriter(&encoded)
 		err = writer.WriteStringRaw(tc.value, huffman)
 		assert.Nil(t, err)
-		fmt.Printf(" = %s\n", hex.EncodeToString(encoded.Bytes()))
 		assert.Equal(t, expected, encoded.Bytes())
 	}
 }

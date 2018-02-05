@@ -15,7 +15,7 @@
    y="0px"
    viewBox="0 0 562.04783 241.91516"
    xml:space="preserve"
-   inkscape:version="0.92.2 (5c3e80d, 2017-08-06)"
+   inkscape:version="0.92.1 r15371"
    sodipodi:docname="minhq.svg"
    width="562.04785"
    height="241.91516"
@@ -24,7 +24,7 @@
    inkscape:export-ydpi="90"><metadata
      id="metadata51"><rdf:RDF><cc:Work
          rdf:about=""><dc:format>image/svg+xml</dc:format><dc:type
-           rdf:resource="http://purl.org/dc/dcmitype/StillImage" /><dc:title></dc:title></cc:Work></rdf:RDF></metadata><defs
+           rdf:resource="http://purl.org/dc/dcmitype/StillImage" /><dc:title /></cc:Work></rdf:RDF></metadata><defs
      id="defs49" /><sodipodi:namedview
      pagecolor="#ffffff"
      bordercolor="#666666"
@@ -34,12 +34,12 @@
      guidetolerance="10"
      inkscape:pageopacity="0"
      inkscape:pageshadow="2"
-     inkscape:window-width="2142"
+     inkscape:window-width="1920"
      inkscape:window-height="739"
      id="namedview47"
      showgrid="false"
      inkscape:zoom="1.9023438"
-     inkscape:cx="102.91931"
+     inkscape:cx="269.83732"
      inkscape:cy="140.32401"
      inkscape:window-x="4"
      inkscape:window-y="0"
@@ -112,7 +112,8 @@
      inkscape:connector-curvature="0"
      sodipodi:nodetypes="ccccc" /><g
      id="g4723"
-     style="fill:#ff540e;fill-opacity:1"><rect
+     style="fill:#ff540e;fill-opacity:1"
+     transform="matrix(-1,0,0,0.944531,262.63223,4.369724)"><rect
        ry="5.0212679"
        y="1.1126139"
        x="151.28531"
@@ -172,7 +173,8 @@
      d="m 843.63086,582.73047 a 3.8799675,3.8799675 0 0 0 -3.87891,3.89258 l 0.15625,42.88281 -40.02343,-45.15234 a 3.8799675,3.8799675 0 0 0 -4.85743,-0.77735 l -25.0625,14.61328 a 3.8799675,3.8799675 0 0 0 -1.92382,3.35157 v 85.54101 a 3.8799675,3.8799675 0 0 0 3.8789,3.87891 h 28.57422 a 3.8799675,3.8799675 0 0 0 3.87891,-3.88086 l -0.0117,-42.8711 39.60351,45.27344 a 3.8799675,3.8799675 0 0 0 4.875,0.79688 L 874.16211,675.5 a 3.8799675,3.8799675 0 0 0 1.92383,-3.35156 V 671.875 586.60938 a 3.8799675,3.8799675 0 0 0 -3.87891,-3.87891 z"
      transform="matrix(0.437448,0,0,0.437448,20.545674,-162.3753)" /><g
      id="g4719"
-     style="fill:#ff540e;fill-opacity:1"><rect
+     style="fill:#ff540e;fill-opacity:1"
+     transform="matrix(-1,0,0,0.944531,262.63223,4.369724)"><rect
        ry="5.0212679"
        y="9.3193054"
        x="136.72681"

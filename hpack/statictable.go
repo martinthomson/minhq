@@ -1,25 +1,25 @@
 package hpack
 
-type hpackStaticEntry struct {
+type staticTableEntry struct {
 	index int
 	name  string
 	value string
 }
 
-func (hse hpackStaticEntry) Index() int {
+func (hse staticTableEntry) Index() int {
 	return hse.index
 }
 
-func (hse hpackStaticEntry) Name() string {
+func (hse staticTableEntry) Name() string {
 	return hse.name
 }
 
-func (hse hpackStaticEntry) Value() string {
+func (hse staticTableEntry) Value() string {
 	return hse.value
 }
 
-// hpackStaticTable contains the static HPACK table
-var hpackStaticTable = []hpackStaticEntry{
+// staticTable contains the static HPACK table
+var staticTable = []staticTableEntry{
 	{1, ":authority", ""},
 	{2, ":method", "GET"},
 	{3, ":method", "POST"},

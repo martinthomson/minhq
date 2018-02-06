@@ -24,7 +24,7 @@ type dynamicEntry struct {
 }
 
 func (hd dynamicEntry) Index() int {
-	return hd.table.inserts - hd.inserts + len(hpackStaticTable) + 1
+	return hd.table.inserts - hd.inserts + len(staticTable) + 1
 }
 
 func (hd dynamicEntry) Name() string {
@@ -57,7 +57,7 @@ var ErrHpackEntryNotFound = errors.New("HPACK table entry not found")
 // Len is the number of entries in the combined table. Note that because
 // HPACK uses a 1-based index, this is the index of the oldest dynamic entry.
 func (table Table) Len() int {
-	return len(hpackStaticTable) + len(table.dynamic)
+	return len(staticTable) + len(table.dynamic)
 }
 
 // Get an entry from the table.
@@ -65,10 +65,10 @@ func (table Table) Get(i int) Entry {
 	if (i <= 0) || (i > table.Len()) {
 		return nil
 	}
-	if i <= len(hpackStaticTable) {
-		return hpackStaticTable[i-1]
+	if i <= len(staticTable) {
+		return staticTable[i-1]
 	}
-	return table.dynamic[i-len(hpackStaticTable)-1]
+	return table.dynamic[i-len(staticTable)-1]
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.

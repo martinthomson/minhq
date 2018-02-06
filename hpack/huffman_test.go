@@ -10,8 +10,8 @@ import (
 )
 
 var tests = []struct {
-	text  string
-	hpack string
+	text    string
+	encoded string
 }{
 	{"www.example.com", "f1e3c2e5f23a6ba0ab90f4ff"},
 	{"no-cache", "a8eb10649cbf"},
@@ -38,7 +38,7 @@ func TestHuffmanCompress(t *testing.T) {
 		err = compressor.Pad()
 		assert.Nil(t, err)
 
-		expected, err := hex.DecodeString(v.hpack)
+		expected, err := hex.DecodeString(v.encoded)
 		assert.Nil(t, err)
 
 		assert.Equal(t, expected, buffer.Bytes())
@@ -47,7 +47,7 @@ func TestHuffmanCompress(t *testing.T) {
 
 func TestHuffmanDecompress(t *testing.T) {
 	for _, v := range tests {
-		compressed, err := hex.DecodeString(v.hpack)
+		compressed, err := hex.DecodeString(v.encoded)
 		assert.Nil(t, err)
 		reader := bytes.NewReader(compressed)
 		decompressor := hpack.NewHuffmanDecompressor(reader)

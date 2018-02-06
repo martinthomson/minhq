@@ -1,21 +1,21 @@
-package hpack_test
+package hc_test
 
 import (
 	"testing"
 
-	"github.com/martinthomson/minhq/hpack"
+	"github.com/martinthomson/minhq/hc"
 	"github.com/stvp/assert"
 )
 
 func TestHpackInsertOverflow(t *testing.T) {
-	var table hpack.Table
+	var table hc.Table
 	table.SetCapacity(32)
 	entry := table.Insert("name", "value")
 	assert.Nil(t, table.Get(entry.Index()))
 }
 
 func TestHpackInsertRetrieve(t *testing.T) {
-	var table hpack.Table
+	var table hc.Table
 	table.SetCapacity(300)
 	entry := table.Insert("name", "value")
 	assert.Equal(t, entry, table.Get(entry.Index()))
@@ -28,7 +28,7 @@ func TestHpackInsertRetrieve(t *testing.T) {
 }
 
 func TestHpackInsertEvict(t *testing.T) {
-	var table hpack.Table
+	var table hc.Table
 	table.SetCapacity(88) // Enough room for two values exactly.
 	_ = table.Insert("name1", "value1")
 	second := table.Insert("name2", "value2")
@@ -42,7 +42,7 @@ func TestHpackInsertEvict(t *testing.T) {
 }
 
 func TestHpackLookupStatic(t *testing.T) {
-	var table hpack.Table
+	var table hc.Table
 	m, nm := table.Lookup(":method", "GET")
 	assert.Equal(t, 2, m.Index())
 	assert.Equal(t, 2, nm.Index())
@@ -53,6 +53,6 @@ func TestHpackLookupStatic(t *testing.T) {
 }
 
 func TestHpackZeroIndex(t *testing.T) {
-	var table hpack.Table
+	var table hc.Table
 	assert.Nil(t, table.Get(0))
 }

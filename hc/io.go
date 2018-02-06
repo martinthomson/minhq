@@ -1,4 +1,4 @@
-package hpack
+package hc
 
 import (
 	"bytes"
@@ -16,8 +16,8 @@ type Reader struct {
 	bitio.BitReader
 }
 
-// NewHpackReader wraps the reader with HPACK-specific reading functions.
-func NewHpackReader(reader io.Reader) *Reader {
+// NewReader wraps the reader with HPACK-specific reading functions.
+func NewReader(reader io.Reader) *Reader {
 	return &Reader{*bitio.NewBitReader(reader)}
 }
 
@@ -82,13 +82,13 @@ func (hr *Reader) ReadString() (string, error) {
 	return string(buf[0:n]), nil
 }
 
-// Writer wraps BitWriter with more methods
+// Writer wraps BitWriter with more methods specific to HPACK.
 type Writer struct {
 	bitio.BitWriter
 }
 
-// NewHpackWriter wraps the writer with HPACK-specific writing functions.
-func NewHpackWriter(writer io.Writer) *Writer {
+// NewWriter wraps the writer with HPACK-specific writing functions.
+func NewWriter(writer io.Writer) *Writer {
 	return &Writer{*bitio.NewBitWriter(writer)}
 }
 

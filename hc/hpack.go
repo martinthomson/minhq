@@ -1,4 +1,4 @@
-package hpack
+package hc
 
 import (
 	"errors"
@@ -20,12 +20,12 @@ type HeaderField struct {
 	Sensitive bool
 }
 
-// Decoder is the top-level class for header decompression.
-type Decoder struct {
+// HpackDecoder is the top-level class for header decompression.
+type HpackDecoder struct {
 	Table Table
 }
 
-func (decoder *Decoder) readIndexed(reader *Reader) (*HeaderField, error) {
+func (decoder *HpackDecoder) readIndexed(reader *Reader) (*HeaderField, error) {
 	index, err := reader.ReadInt(7)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (decoder *Decoder) readIndexed(reader *Reader) (*HeaderField, error) {
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
 }
 
-func (decoder *Decoder) readNameValue(reader *Reader, prefix byte) (string, string, error) {
+func (decoder *HpackDecoder) readNameValue(reader *Reader, prefix byte) (string, string, error) {
 	index, err := reader.ReadInt(prefix)
 	if err != nil {
 		return "", "", err
@@ -62,7 +62,7 @@ func (decoder *Decoder) readNameValue(reader *Reader, prefix byte) (string, stri
 	return name, value, nil
 }
 
-func (decoder *Decoder) readIncremental(reader *Reader) (*HeaderField, error) {
+func (decoder *HpackDecoder) readIncremental(reader *Reader) (*HeaderField, error) {
 	name, value, err := decoder.readNameValue(reader, 6)
 	if err != nil {
 		return nil, err
@@ -71,7 +71,7 @@ func (decoder *Decoder) readIncremental(reader *Reader) (*HeaderField, error) {
 	return &HeaderField{name, value, false}, nil
 }
 
-func (decoder *Decoder) readCapacity(reader *Reader) error {
+func (decoder *HpackDecoder) readCapacity(reader *Reader) error {
 	capacity, err := reader.ReadInt(5)
 	if err != nil {
 		return err
@@ -80,7 +80,7 @@ func (decoder *Decoder) readCapacity(reader *Reader) error {
 	return nil
 }
 
-func (decoder *Decoder) readLiteral(reader *Reader) (*HeaderField, error) {
+func (decoder *HpackDecoder) readLiteral(reader *Reader) (*HeaderField, error) {
 	ni, err := reader.ReadBit()
 	if err != nil {
 		return nil, err
@@ -94,8 +94,8 @@ func (decoder *Decoder) readLiteral(reader *Reader) (*HeaderField, error) {
 }
 
 // ReadHeaderBlock decodes header fields as they arrive.
-func (decoder *Decoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
-	reader := NewHpackReader(r)
+func (decoder *HpackDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
+	reader := NewReader(r)
 	headers := []HeaderField{}
 	for {
 		b, err := reader.ReadBit()
@@ -163,8 +163,8 @@ func (decoder *Decoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
 	return headers, nil
 }
 
-// Encoder is the top-level class for header compression.
-type Encoder struct {
+// HpackEncoder is the top-level class for header compression.
+type HpackEncoder struct {
 	// Table is public to provide access to its methods.
 	Table Table
 	// HuffmanPreference records preferences for Huffman coding of strings.
@@ -175,7 +175,7 @@ type Encoder struct {
 	indexPrefs   map[string]bool
 }
 
-func (encoder *Encoder) writeCapacity(writer *Writer, c TableCapacity) error {
+func (encoder *HpackEncoder) writeCapacity(writer *Writer, c TableCapacity) error {
 	err := writer.WriteBits(1, 3)
 	if err != nil {
 		return err
@@ -187,7 +187,7 @@ func (encoder *Encoder) writeCapacity(writer *Writer, c TableCapacity) error {
 	return nil
 }
 
-func (encoder *Encoder) writeCapacityChange(writer *Writer) error {
+func (encoder *HpackEncoder) writeCapacityChange(writer *Writer) error {
 	if encoder.minCapacity < encoder.Table.capacity {
 		err := encoder.writeCapacity(writer, encoder.minCapacity)
 		if err != nil {
@@ -206,7 +206,7 @@ func (encoder *Encoder) writeCapacityChange(writer *Writer) error {
 	return nil
 }
 
-func (encoder *Encoder) writeIndexed(writer *Writer, entry Entry) error {
+func (encoder *HpackEncoder) writeIndexed(writer *Writer, entry Entry) error {
 	err := writer.WriteBit(1)
 	if err != nil {
 		return err
@@ -214,7 +214,7 @@ func (encoder *Encoder) writeIndexed(writer *Writer, entry Entry) error {
 	return writer.WriteInt(uint64(entry.Index()), 7)
 }
 
-func (encoder Encoder) avoidIndexing(h HeaderField) bool {
+func (encoder HpackEncoder) avoidIndexing(h HeaderField) bool {
 	// Ignore the values here.
 	var dontIndex = map[string]bool{
 		":path":               true,
@@ -247,7 +247,7 @@ func (encoder Encoder) avoidIndexing(h HeaderField) bool {
 	return false
 }
 
-func (encoder *Encoder) writeIncremental(writer *Writer, h HeaderField, nameEntry Entry) error {
+func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nameEntry Entry) error {
 	err := writer.WriteBits(1, 2)
 	if err != nil {
 		return err
@@ -276,7 +276,7 @@ func (encoder *Encoder) writeIncremental(writer *Writer, h HeaderField, nameEntr
 	return nil
 }
 
-func (encoder Encoder) writeLiteral(writer *Writer, h HeaderField, nameEntry Entry) error {
+func (encoder HpackEncoder) writeLiteral(writer *Writer, h HeaderField, nameEntry Entry) error {
 	code := uint64(0)
 	if h.Sensitive {
 		code = 1
@@ -305,8 +305,8 @@ func (encoder Encoder) writeLiteral(writer *Writer, h HeaderField, nameEntry Ent
 }
 
 // WriteHeaderBlock writes out a header block.
-func (encoder *Encoder) WriteHeaderBlock(w io.Writer, headers ...HeaderField) error {
-	writer := NewHpackWriter(w)
+func (encoder *HpackEncoder) WriteHeaderBlock(w io.Writer, headers ...HeaderField) error {
+	writer := NewWriter(w)
 	err := encoder.writeCapacityChange(writer)
 	if err != nil {
 		return err
@@ -349,7 +349,7 @@ func (encoder *Encoder) WriteHeaderBlock(w io.Writer, headers ...HeaderField) er
 // the peer can be set, if there are constraints on memory and the peer isn't
 // trusted to set sane values. Failing to call this will result in no additions
 // to the dynamic table and poor compression performance.
-func (encoder *Encoder) SetCapacity(c TableCapacity) {
+func (encoder *HpackEncoder) SetCapacity(c TableCapacity) {
 	if c < encoder.minCapacity {
 		encoder.minCapacity = c
 	}
@@ -358,11 +358,11 @@ func (encoder *Encoder) SetCapacity(c TableCapacity) {
 
 // SetIndexPreference sets preferences for header fields with the given name.
 // Set to true to index, false to never index.
-func (encoder *Encoder) SetIndexPreference(name string, pref bool) {
+func (encoder *HpackEncoder) SetIndexPreference(name string, pref bool) {
 	encoder.indexPrefs[name] = pref
 }
 
 // ClearIndexPreference resets the preference for indexing for the named header field.
-func (encoder *Encoder) ClearIndexPreference(name string) {
+func (encoder *HpackEncoder) ClearIndexPreference(name string) {
 	delete(encoder.indexPrefs, name)
 }

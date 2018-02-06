@@ -1,4 +1,4 @@
-package hpack_test
+package hc_test
 
 import (
 	"bytes"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/martinthomson/minhq/hpack"
+	"github.com/martinthomson/minhq/hc"
 	"github.com/stvp/assert"
 )
 
@@ -18,15 +18,15 @@ type dynamicTableEntry struct {
 
 var testCases = []struct {
 	resetTable   bool
-	headers      []hpack.HeaderField
+	headers      []hc.HeaderField
 	huffman      bool
 	encoded      string
-	tableSize    hpack.TableCapacity
+	tableSize    hc.TableCapacity
 	dynamicTable []dynamicTableEntry
 }{
 	{
 		resetTable: true,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: "custom-key", Value: "custom-header", Sensitive: false},
 		},
 		huffman:   false,
@@ -38,7 +38,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: true,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":path", Value: "/sample/path", Sensitive: false},
 		},
 		huffman:      false,
@@ -48,7 +48,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: true,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: "password", Value: "secret", Sensitive: true},
 		},
 		huffman:      false,
@@ -58,7 +58,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: true,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":method", Value: "GET", Sensitive: false},
 		},
 		huffman:      false,
@@ -68,7 +68,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: true,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":method", Value: "GET", Sensitive: false},
 			{Name: ":scheme", Value: "http", Sensitive: false},
 			{Name: ":path", Value: "/", Sensitive: false},
@@ -83,7 +83,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: false,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":method", Value: "GET", Sensitive: false},
 			{Name: ":scheme", Value: "http", Sensitive: false},
 			{Name: ":path", Value: "/", Sensitive: false},
@@ -100,7 +100,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: false,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":method", Value: "GET", Sensitive: false},
 			{Name: ":scheme", Value: "https", Sensitive: false},
 			{Name: ":path", Value: "/index.html", Sensitive: false},
@@ -118,7 +118,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: true,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":method", Value: "GET", Sensitive: false},
 			{Name: ":scheme", Value: "http", Sensitive: false},
 			{Name: ":path", Value: "/", Sensitive: false},
@@ -133,7 +133,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: false,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":method", Value: "GET", Sensitive: false},
 			{Name: ":scheme", Value: "http", Sensitive: false},
 			{Name: ":path", Value: "/", Sensitive: false},
@@ -150,7 +150,7 @@ var testCases = []struct {
 	},
 	{
 		resetTable: false,
-		headers: []hpack.HeaderField{
+		headers: []hc.HeaderField{
 			{Name: ":method", Value: "GET", Sensitive: false},
 			{Name: ":scheme", Value: "https", Sensitive: false},
 			{Name: ":path", Value: "/index.html", Sensitive: false},
@@ -168,7 +168,7 @@ var testCases = []struct {
 	},
 }
 
-func resetEncoderCapacity(t *testing.T, encoder *hpack.Encoder, first bool) {
+func resetEncoderCapacity(t *testing.T, encoder *hc.HpackEncoder, first bool) {
 	encoder.SetCapacity(0)
 	encoder.SetCapacity(4096)
 	var capacity bytes.Buffer
@@ -181,7 +181,7 @@ func resetEncoderCapacity(t *testing.T, encoder *hpack.Encoder, first bool) {
 	assert.Equal(t, message, capacity.Bytes())
 }
 
-func checkDynamicTable(t *testing.T, table *hpack.Table, entries []dynamicTableEntry) {
+func checkDynamicTable(t *testing.T, table *hc.Table, entries []dynamicTableEntry) {
 	for _, e := range entries {
 		// Offset by the size of the static table, so that we can add the 1-based
 		// indexes for entries in the dynamic table to it easily.
@@ -193,7 +193,7 @@ func checkDynamicTable(t *testing.T, table *hpack.Table, entries []dynamicTableE
 }
 
 func TestHpackEncoder(t *testing.T) {
-	var encoder hpack.Encoder
+	var encoder hc.HpackEncoder
 	resetEncoderCapacity(t, &encoder, true)
 
 	for _, tc := range testCases {
@@ -201,9 +201,9 @@ func TestHpackEncoder(t *testing.T) {
 			resetEncoderCapacity(t, &encoder, false)
 		}
 		if tc.huffman {
-			encoder.HuffmanPreference = hpack.HuffmanCodingAlways
+			encoder.HuffmanPreference = hc.HuffmanCodingAlways
 		} else {
-			encoder.HuffmanPreference = hpack.HuffmanCodingNever
+			encoder.HuffmanPreference = hc.HuffmanCodingNever
 		}
 
 		var buf bytes.Buffer
@@ -222,15 +222,15 @@ func TestHpackEncoder(t *testing.T) {
 }
 
 func TestHpackEncoderPseudoHeaderOrder(t *testing.T) {
-	var encoder hpack.Encoder
+	var encoder hc.HpackEncoder
 	var buf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&buf,
-		hpack.HeaderField{Name: "regular", Value: "1", Sensitive: false},
-		hpack.HeaderField{Name: ":pseudo", Value: "1", Sensitive: false})
-	assert.Equal(t, hpack.ErrPseudoHeaderOrdering, err)
+		hc.HeaderField{Name: "regular", Value: "1", Sensitive: false},
+		hc.HeaderField{Name: ":pseudo", Value: "1", Sensitive: false})
+	assert.Equal(t, hc.ErrPseudoHeaderOrdering, err)
 }
 
-func resetDecoderCapacity(t *testing.T, decoder *hpack.Decoder) {
+func resetDecoderCapacity(t *testing.T, decoder *hc.HpackDecoder) {
 	reader := bytes.NewReader([]byte{0x20, 0x3f, 0xe1, 0x1f})
 	h, err := decoder.ReadHeaderBlock(reader)
 	assert.Nil(t, err)
@@ -238,7 +238,7 @@ func resetDecoderCapacity(t *testing.T, decoder *hpack.Decoder) {
 }
 
 func TestHpackDecoder(t *testing.T) {
-	var decoder hpack.Decoder
+	var decoder hc.HpackDecoder
 	// Avoid an extra reset.
 	assert.True(t, testCases[0].resetTable)
 
@@ -259,13 +259,13 @@ func TestHpackDecoder(t *testing.T) {
 }
 
 func TestHpackDecoderPseudoHeaderOrder(t *testing.T) {
-	var decoder hpack.Decoder
+	var decoder hc.HpackDecoder
 	_, err := decoder.ReadHeaderBlock(bytes.NewReader([]byte{0x90, 0x81}))
-	assert.Equal(t, hpack.ErrPseudoHeaderOrdering, err)
+	assert.Equal(t, hc.ErrPseudoHeaderOrdering, err)
 }
 
 func TestHpackEviction(t *testing.T) {
-	headers := []hpack.HeaderField{
+	headers := []hc.HeaderField{
 		{Name: "one", Value: "1", Sensitive: false},
 		{Name: "two", Value: "2", Sensitive: false},
 	}
@@ -273,14 +273,14 @@ func TestHpackEviction(t *testing.T) {
 		{1, "two", "2"},
 	}
 
-	var encoder hpack.Encoder
+	var encoder hc.HpackEncoder
 	encoder.SetCapacity(64)
 	var buf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&buf, headers...)
 	assert.Nil(t, err)
 	checkDynamicTable(t, &encoder.Table, dynamicTable)
 
-	var decoder hpack.Decoder
+	var decoder hc.HpackDecoder
 	h, err := decoder.ReadHeaderBlock(&buf)
 	assert.Nil(t, err)
 	assert.Equal(t, headers, h)

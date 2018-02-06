@@ -1,11 +1,11 @@
-package hpack_test
+package hc_test
 
 import (
 	"bytes"
 	"encoding/hex"
 	"testing"
 
-	"github.com/martinthomson/minhq/hpack"
+	"github.com/martinthomson/minhq/hc"
 	"github.com/stvp/assert"
 )
 
@@ -30,7 +30,7 @@ var tests = []struct {
 func TestHuffmanCompress(t *testing.T) {
 	for _, v := range tests {
 		var buffer bytes.Buffer
-		compressor := hpack.NewHuffmanCompressor(&buffer)
+		compressor := hc.NewHuffmanCompressor(&buffer)
 
 		n, err := compressor.Write([]byte(v.text))
 		assert.Nil(t, err)
@@ -50,7 +50,7 @@ func TestHuffmanDecompress(t *testing.T) {
 		compressed, err := hex.DecodeString(v.encoded)
 		assert.Nil(t, err)
 		reader := bytes.NewReader(compressed)
-		decompressor := hpack.NewHuffmanDecompressor(reader)
+		decompressor := hc.NewHuffmanDecompressor(reader)
 
 		decompressed := make([]byte, len(compressed)*2)
 		n, _ := decompressor.Read(decompressed)

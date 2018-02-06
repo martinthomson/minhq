@@ -1,4 +1,4 @@
-package hpack
+package hc
 
 type huffmanTableItem struct {
 	len uint8

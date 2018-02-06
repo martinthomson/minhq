@@ -1,4 +1,4 @@
-package hpack
+package hc
 
 import (
 	"errors"

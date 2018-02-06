@@ -1,4 +1,4 @@
-package hpack
+package hc
 
 type staticTableEntry struct {
 	index int

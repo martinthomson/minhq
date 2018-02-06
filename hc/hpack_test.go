@@ -11,7 +11,6 @@ import (
 )
 
 type dynamicTableEntry struct {
-	index int
 	name  string
 	value string
 }
@@ -33,7 +32,7 @@ var testCases = []struct {
 		encoded:   "400a637573746f6d2d6b65790d637573746f6d2d686561646572",
 		tableSize: 55,
 		dynamicTable: []dynamicTableEntry{
-			{1, "custom-key", "custom-header"},
+			{"custom-key", "custom-header"},
 		},
 	},
 	{
@@ -78,7 +77,7 @@ var testCases = []struct {
 		encoded:   "828684410f7777772e6578616d706c652e636f6d",
 		tableSize: 57,
 		dynamicTable: []dynamicTableEntry{
-			{1, ":authority", "www.example.com"},
+			{":authority", "www.example.com"},
 		},
 	},
 	{
@@ -94,8 +93,8 @@ var testCases = []struct {
 		encoded:   "828684be58086e6f2d6361636865",
 		tableSize: 110,
 		dynamicTable: []dynamicTableEntry{
-			{1, "cache-control", "no-cache"},
-			{2, ":authority", "www.example.com"},
+			{"cache-control", "no-cache"},
+			{":authority", "www.example.com"},
 		},
 	},
 	{
@@ -111,9 +110,9 @@ var testCases = []struct {
 		encoded:   "828785bf400a637573746f6d2d6b65790c637573746f6d2d76616c7565",
 		tableSize: 164,
 		dynamicTable: []dynamicTableEntry{
-			{1, "custom-key", "custom-value"},
-			{2, "cache-control", "no-cache"},
-			{3, ":authority", "www.example.com"},
+			{"custom-key", "custom-value"},
+			{"cache-control", "no-cache"},
+			{":authority", "www.example.com"},
 		},
 	},
 	{
@@ -128,7 +127,7 @@ var testCases = []struct {
 		encoded:   "828684418cf1e3c2e5f23a6ba0ab90f4ff",
 		tableSize: 57,
 		dynamicTable: []dynamicTableEntry{
-			{1, ":authority", "www.example.com"},
+			{":authority", "www.example.com"},
 		},
 	},
 	{
@@ -144,8 +143,8 @@ var testCases = []struct {
 		encoded:   "828684be5886a8eb10649cbf",
 		tableSize: 110,
 		dynamicTable: []dynamicTableEntry{
-			{1, "cache-control", "no-cache"},
-			{2, ":authority", "www.example.com"},
+			{"cache-control", "no-cache"},
+			{":authority", "www.example.com"},
 		},
 	},
 	{
@@ -161,9 +160,69 @@ var testCases = []struct {
 		encoded:   "828785bf408825a849e95ba97d7f8925a849e95bb8e8b4bf",
 		tableSize: 164,
 		dynamicTable: []dynamicTableEntry{
-			{1, "custom-key", "custom-value"},
-			{2, "cache-control", "no-cache"},
-			{3, ":authority", "www.example.com"},
+			{"custom-key", "custom-value"},
+			{"cache-control", "no-cache"},
+			{":authority", "www.example.com"},
+		},
+	},
+	{
+		resetTable: true,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "302", Sensitive: false},
+			{Name: "cache-control", Value: "private", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
+			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+		},
+		huffman: false,
+		encoded: "4803333032580770726976617465611d4d6f6e2c203231204f63742032303133" +
+			"2032303a31333a323120474d546e1768747470733a2f2f7777772e6578616d70" +
+			"6c652e636f6d",
+		tableSize: 222,
+		dynamicTable: []dynamicTableEntry{
+			{"location", "https://www.example.com"},
+			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{"cache-control", "private"},
+			{":status", "302"},
+		},
+	},
+	{
+		resetTable: false,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "307", Sensitive: false},
+			{Name: "cache-control", Value: "private", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
+			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+		},
+		huffman:   false,
+		encoded:   "4803333037c1c0bf",
+		tableSize: 222,
+		dynamicTable: []dynamicTableEntry{
+			{":status", "307"},
+			{"location", "https://www.example.com"},
+			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{"cache-control", "private"},
+		},
+	},
+	{
+		resetTable: false,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "200", Sensitive: false},
+			{Name: "cache-control", Value: "private", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
+			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+			{Name: "set-cookie", Value: "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1", Sensitive: false},
+		},
+		huffman: false,
+		encoded: "88c1611d4d6f6e2c203231204f637420323031332032303a31333a323220474d" +
+			"54c05a04677a69707738666f6f3d4153444a4b48514b425a584f5157454f5049" +
+			"5541585157454f49553b206d61782d6167653d333630303b2076657273696f6e" +
+			"3d31",
+		tableSize: 215,
+		dynamicTable: []dynamicTableEntry{
+			{"set-cookie", "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1"},
+			{"content-encoding", "gzip"},
+			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 	},
 	{
@@ -179,21 +238,60 @@ var testCases = []struct {
 			"2d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3",
 		tableSize: 222,
 		dynamicTable: []dynamicTableEntry{
-			{1, "location", "https://www.example.com"},
-			{2, "date", "Mon, 21 Oct 2013 20:13:21 GMT"},
-			{3, "cache-control", "private"},
-			{4, ":status", "302"},
+			{"location", "https://www.example.com"},
+			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{"cache-control", "private"},
+			{":status", "302"},
+		},
+	},
+	{
+		resetTable: false,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "307", Sensitive: false},
+			{Name: "cache-control", Value: "private", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
+			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+		},
+		huffman:   true,
+		encoded:   "4883640effc1c0bf",
+		tableSize: 222,
+		dynamicTable: []dynamicTableEntry{
+			{":status", "307"},
+			{"location", "https://www.example.com"},
+			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{"cache-control", "private"},
+		},
+	},
+	{
+		resetTable: false,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "200", Sensitive: false},
+			{Name: "cache-control", Value: "private", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
+			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+			{Name: "set-cookie", Value: "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1", Sensitive: false},
+		},
+		huffman: true,
+		encoded: "88c16196d07abe941054d444a8200595040b8166e084a62d1bffc05a839bd9ab" +
+			"77ad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1ab270fb5291f" +
+			"9587316065c003ed4ee5b1063d5007",
+		tableSize: 215,
+		dynamicTable: []dynamicTableEntry{
+			{"set-cookie", "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1"},
+			{"content-encoding", "gzip"},
+			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 	},
 }
 
 func resetEncoderCapacity(t *testing.T, encoder *hc.HpackEncoder, first bool) {
 	encoder.SetCapacity(0)
-	encoder.SetCapacity(4096)
+	encoder.SetCapacity(256)
 	var capacity bytes.Buffer
 	err := encoder.WriteHeaderBlock(&capacity)
 	assert.Nil(t, err)
-	message := []byte{0x20, 0x3f, 0xe1, 0x1f}
+	message := []byte{0x20, 0x3f, 0xe1, 0x01}
 	if first {
 		message = message[1:]
 	}
@@ -201,10 +299,9 @@ func resetEncoderCapacity(t *testing.T, encoder *hc.HpackEncoder, first bool) {
 }
 
 func checkDynamicTable(t *testing.T, table *hc.Table, entries []dynamicTableEntry) {
-	for _, e := range entries {
-		// Offset by the size of the static table, so that we can add the 1-based
-		// indexes for entries in the dynamic table to it easily.
-		entry := table.Get(e.index + 61)
+	for i, e := range entries {
+		// The initial offset for dynamic entries is 62 in HPACK.
+		entry := table.Get(i + 62)
 		assert.NotNil(t, entry)
 		assert.Equal(t, e.name, entry.Name())
 		assert.Equal(t, e.value, entry.Value())
@@ -252,7 +349,7 @@ func TestHpackEncoderPseudoHeaderOrder(t *testing.T) {
 }
 
 func resetDecoderCapacity(t *testing.T, decoder *hc.HpackDecoder) {
-	reader := bytes.NewReader([]byte{0x20, 0x3f, 0xe1, 0x1f})
+	reader := bytes.NewReader([]byte{0x20, 0x3f, 0xe1, 0x01})
 	h, err := decoder.ReadHeaderBlock(reader)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, len(h))
@@ -291,7 +388,7 @@ func TestHpackEviction(t *testing.T) {
 		{Name: "two", Value: "2", Sensitive: false},
 	}
 	dynamicTable := []dynamicTableEntry{
-		{1, "two", "2"},
+		{"two", "2"},
 	}
 
 	var encoder hc.HpackEncoder

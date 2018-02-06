@@ -9,6 +9,10 @@ import (
 // received.
 var ErrIndexError = errors.New("HPACK decoder read an invalid index")
 
+// ErrPseudoHeaderOrdering indicates that a pseudo header field was placed after
+// a non-pseudo header field.
+var ErrPseudoHeaderOrdering = errors.New("Pseudo header field ordering")
+
 // HeaderField is the interface that header fields need to comply with.
 type HeaderField struct {
 	Name      string
@@ -143,6 +147,18 @@ func (decoder *Decoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
 			return nil, err
 		}
 		headers = append(headers, *h)
+	}
+
+	// Sanity-check header ordering.
+	pseudo := true
+	for _, h := range headers {
+		if h.Name[0] == ':' {
+			if !pseudo {
+				return nil, ErrPseudoHeaderOrdering
+			}
+		} else {
+			pseudo = false
+		}
 	}
 	return headers, nil
 }
@@ -288,8 +304,16 @@ func (encoder *Encoder) WriteHeaderBlock(w io.Writer, headers ...HeaderField) er
 	if err != nil {
 		return err
 	}
+	pseudo := true
 	for _, h := range headers {
 		name, value := h.Name, h.Value
+		if name[0] == ':' {
+			if !pseudo {
+				return ErrPseudoHeaderOrdering
+			}
+		} else {
+			pseudo = false
+		}
 		m, nm := encoder.table.Lookup(name, value)
 		if m != nil {
 			err = encoder.writeIndexed(writer, m)

@@ -22,7 +22,7 @@ type HeaderField struct {
 
 // Decoder is the top-level class for header decompression.
 type Decoder struct {
-	table Table
+	Table Table
 }
 
 func (decoder *Decoder) readIndexed(reader *Reader) (*HeaderField, error) {
@@ -30,7 +30,7 @@ func (decoder *Decoder) readIndexed(reader *Reader) (*HeaderField, error) {
 	if err != nil {
 		return nil, err
 	}
-	entry := decoder.table.Get(int(index))
+	entry := decoder.Table.Get(int(index))
 	if entry == nil {
 		return nil, ErrIndexError
 	}
@@ -49,7 +49,7 @@ func (decoder *Decoder) readNameValue(reader *Reader, prefix byte) (string, stri
 			return "", "", err
 		}
 	} else {
-		entry := decoder.table.Get(int(index))
+		entry := decoder.Table.Get(int(index))
 		if entry == nil {
 			return "", "", ErrIndexError
 		}
@@ -67,7 +67,7 @@ func (decoder *Decoder) readIncremental(reader *Reader) (*HeaderField, error) {
 	if err != nil {
 		return nil, err
 	}
-	decoder.table.Insert(name, value)
+	decoder.Table.Insert(name, value)
 	return &HeaderField{name, value, false}, nil
 }
 
@@ -76,7 +76,7 @@ func (decoder *Decoder) readCapacity(reader *Reader) error {
 	if err != nil {
 		return err
 	}
-	decoder.table.SetCapacity(TableCapacity(capacity))
+	decoder.Table.SetCapacity(TableCapacity(capacity))
 	return nil
 }
 
@@ -233,7 +233,7 @@ func (encoder Encoder) avoidIndexing(h HeaderField) bool {
 		"refresh":             true,
 	}
 
-	if h.Sensitive {
+	if TableCapacity(len(h.Name)+len(h.Value)+32) > encoder.Table.capacity {
 		return true
 	}
 	pref, ok := encoder.indexPrefs[h.Name]
@@ -276,8 +276,7 @@ func (encoder *Encoder) writeIncremental(writer *Writer, h HeaderField, nameEntr
 	return nil
 }
 
-func (encoder Encoder) writeLiteral(writer *Writer, h HeaderField,
-	nameEntry Entry) error {
+func (encoder Encoder) writeLiteral(writer *Writer, h HeaderField, nameEntry Entry) error {
 	code := uint64(0)
 	if h.Sensitive {
 		code = 1
@@ -322,11 +321,17 @@ func (encoder *Encoder) WriteHeaderBlock(w io.Writer, headers ...HeaderField) er
 		} else {
 			pseudo = false
 		}
-		m, nm := encoder.Table.Lookup(name, value)
-		if m != nil {
-			err = encoder.writeIndexed(writer, m)
+		if h.Sensitive {
+			// It's not clear here whether the name is sensitive, but let's assume that
+			// it might be. It's not exactly rational to put secrets in header field
+			// names (how do you find them again?), but it's safer not to assume rational
+			// behaviour.
+			err = encoder.writeLiteral(writer, h, nil)
 		} else {
-			if encoder.avoidIndexing(h) {
+			m, nm := encoder.Table.Lookup(name, value)
+			if m != nil {
+				err = encoder.writeIndexed(writer, m)
+			} else if encoder.avoidIndexing(h) {
 				err = encoder.writeLiteral(writer, h, nm)
 			} else {
 				err = encoder.writeIncremental(writer, h, nm)

@@ -64,8 +64,7 @@ func (hr *Reader) ReadString() (string, error) {
 	if err != nil {
 		return "", nil
 	}
-	var valueReader io.Reader
-	valueReader = &io.LimitedReader{R: hr, N: int64(len)}
+	var valueReader io.Reader = &io.LimitedReader{R: hr, N: int64(len)}
 	var buf []byte
 	if huffman != 0 {
 		valueReader = NewHuffmanDecompressor(valueReader)
@@ -137,8 +136,7 @@ const (
 
 // WriteStringRaw writes out the specified string.
 func (hw *Writer) WriteStringRaw(s string, huffman HuffmanCodingChoice) error {
-	var reader io.Reader
-	reader = bytes.NewReader([]byte(s))
+	var reader io.Reader = bytes.NewReader([]byte(s))
 	l := len(s)
 	hbit := byte(0)
 	if huffman != HuffmanCodingNever {

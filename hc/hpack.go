@@ -1,28 +1,12 @@
 package hc
 
 import (
-	"errors"
 	"io"
 )
 
-// ErrIndexError is a decoder error for the case where an invalid index is
-// received.
-var ErrIndexError = errors.New("HPACK decoder read an invalid index")
-
-// ErrPseudoHeaderOrdering indicates that a pseudo header field was placed after
-// a non-pseudo header field.
-var ErrPseudoHeaderOrdering = errors.New("Pseudo header field ordering")
-
-// HeaderField is the interface that header fields need to comply with.
-type HeaderField struct {
-	Name      string
-	Value     string
-	Sensitive bool
-}
-
 // HpackDecoder is the top-level class for header decompression.
 type HpackDecoder struct {
-	Table Table
+	decoderCommon
 }
 
 func (decoder *HpackDecoder) readIndexed(reader *Reader) (*HeaderField, error) {
@@ -35,31 +19,6 @@ func (decoder *HpackDecoder) readIndexed(reader *Reader) (*HeaderField, error) {
 		return nil, ErrIndexError
 	}
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
-}
-
-func (decoder *HpackDecoder) readNameValue(reader *Reader, prefix byte) (string, string, error) {
-	index, err := reader.ReadInt(prefix)
-	if err != nil {
-		return "", "", err
-	}
-	var name string
-	if index == 0 {
-		name, err = reader.ReadString()
-		if err != nil {
-			return "", "", err
-		}
-	} else {
-		entry := decoder.Table.Get(int(index))
-		if entry == nil {
-			return "", "", ErrIndexError
-		}
-		name = entry.Name()
-	}
-	value, err := reader.ReadString()
-	if err != nil {
-		return "", "", err
-	}
-	return name, value, nil
 }
 
 func (decoder *HpackDecoder) readIncremental(reader *Reader) (*HeaderField, error) {
@@ -165,14 +124,10 @@ func (decoder *HpackDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 
 // HpackEncoder is the top-level class for header compression.
 type HpackEncoder struct {
-	// Table is public to provide access to its methods.
-	Table Table
-	// HuffmanPreference records preferences for Huffman coding of strings.
-	HuffmanPreference HuffmanCodingChoice
+	encoderCommon
 	// Track changes to capacity so that we can reflect them properly.
 	minCapacity  TableCapacity
 	nextCapacity TableCapacity
-	indexPrefs   map[string]bool
 }
 
 func (encoder *HpackEncoder) writeCapacity(writer *Writer, c TableCapacity) error {
@@ -214,61 +169,13 @@ func (encoder *HpackEncoder) writeIndexed(writer *Writer, entry Entry) error {
 	return writer.WriteInt(uint64(entry.Index()), 7)
 }
 
-func (encoder HpackEncoder) shouldIndex(h HeaderField) bool {
-	// Ignore the values here.
-	var dontIndex = map[string]bool{
-		":path":               true,
-		"content-length":      true,
-		"content-range":       true,
-		"date":                true,
-		"expires":             true,
-		"etag":                true,
-		"if-modified-since":   true,
-		"if-range":            true,
-		"if-unmodified-since": true,
-		"last-modified":       true,
-		"link":                true,
-		"range":               true,
-		"referer":             true,
-		"refresh":             true,
-	}
-
-	if TableCapacity(len(h.Name)+len(h.Value)+32) > encoder.Table.capacity {
-		return false
-	}
-	pref, ok := encoder.indexPrefs[h.Name]
-	if ok {
-		return pref
-	}
-	_, d := dontIndex[h.Name]
-	if d {
-		return false
-	}
-	return true
-}
-
 func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nameEntry Entry) error {
 	err := writer.WriteBits(1, 2)
 	if err != nil {
 		return err
 	}
 
-	nameIndex := uint64(0)
-	if nameEntry != nil {
-		nameIndex = uint64(nameEntry.Index())
-	}
-	err = writer.WriteInt(nameIndex, 6)
-	if err != nil {
-		return err
-	}
-	if nameEntry == nil {
-		err = writer.WriteStringRaw(h.Name, encoder.HuffmanPreference)
-		if err != nil {
-			return err
-		}
-	}
-
-	err = writer.WriteStringRaw(h.Value, encoder.HuffmanPreference)
+	err = encoder.writeNameValue(writer, h, nameEntry, 6)
 	if err != nil {
 		return err
 	}
@@ -286,22 +193,7 @@ func (encoder HpackEncoder) writeLiteral(writer *Writer, h HeaderField, nameEntr
 		return err
 	}
 
-	nameIndex := uint64(0)
-	if nameEntry != nil {
-		nameIndex = uint64(nameEntry.Index())
-	}
-	err = writer.WriteInt(nameIndex, 4)
-	if err != nil {
-		return err
-	}
-	if nameEntry == nil {
-		err = writer.WriteStringRaw(h.Name, encoder.HuffmanPreference)
-		if err != nil {
-			return err
-		}
-	}
-
-	return writer.WriteStringRaw(h.Value, encoder.HuffmanPreference)
+	return encoder.writeNameValue(writer, h, nameEntry, 4)
 }
 
 // WriteHeaderBlock writes out a header block.
@@ -354,18 +246,4 @@ func (encoder *HpackEncoder) SetCapacity(c TableCapacity) {
 		encoder.minCapacity = c
 	}
 	encoder.nextCapacity = c
-}
-
-// SetIndexPreference sets preferences for header fields with the given name.
-// Set to true to index, false to never index.
-func (encoder *HpackEncoder) SetIndexPreference(name string, pref bool) {
-	if encoder.indexPrefs == nil {
-		encoder.indexPrefs = make(map[string]bool)
-	}
-	encoder.indexPrefs[name] = pref
-}
-
-// ClearIndexPreference resets the preference for indexing for the named header field.
-func (encoder *HpackEncoder) ClearIndexPreference(name string) {
-	delete(encoder.indexPrefs, name)
 }

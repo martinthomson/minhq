@@ -3,7 +3,6 @@ package hc_test
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"testing"
 
 	"github.com/martinthomson/minhq/hc"
@@ -334,8 +333,6 @@ func TestHpackEncoder(t *testing.T) {
 
 		encoded, err := hex.DecodeString(tc.encoded)
 		assert.Nil(t, err)
-		fmt.Printf("expected: %v\n", tc.encoded)
-		fmt.Printf("encoded:  %v\n", hex.EncodeToString(buf.Bytes()))
 		assert.Equal(t, encoded, buf.Bytes())
 
 		assert.Equal(t, tc.tableSize, encoder.Table.Used())

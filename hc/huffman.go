@@ -36,15 +36,15 @@ func (compressor *HuffmanCompressor) Pad() error {
 	return compressor.writer.Pad(0xff)
 }
 
-// This is a node in the reverse mapping tree.  We use 4-bit chunks because those result in at most a single emission of a character.
-type node struct {
-	next [2]*node
+// This is a huffmanDecoderNode in the reverse mapping tree.  We use 4-bit chunks because those result in at most a single emission of a character.
+type huffmanDecoderNode struct {
+	next [2]*huffmanDecoderNode
 	leaf bool
 	val  byte
 }
 
-func makeLayer(prefix uint32, prefixLen byte) *node {
-	layer := new(node)
+func makeLayer(prefix uint32, prefixLen byte) *huffmanDecoderNode {
+	layer := new(huffmanDecoderNode)
 	found := false
 	for i, e := range huffmanTable {
 		if e.len < prefixLen+1 {
@@ -54,9 +54,9 @@ func makeLayer(prefix uint32, prefixLen byte) *node {
 			continue
 		}
 		arity := (e.val >> (e.len - prefixLen - 1)) & 1
-		var child *node
+		var child *huffmanDecoderNode
 		if e.len == prefixLen+1 {
-			child = new(node)
+			child = new(huffmanDecoderNode)
 			child.leaf = true
 			child.val = byte(i)
 			layer.next[arity] = child
@@ -78,7 +78,7 @@ func makeLayer(prefix uint32, prefixLen byte) *node {
 	return layer
 }
 
-var decompressorTree *node
+var decompressorTree *huffmanDecoderNode
 
 func initDecompressorTree() {
 	if decompressorTree == nil {
@@ -89,7 +89,7 @@ func initDecompressorTree() {
 // HuffmanDecompressor is the opposite of huffmanCompressor
 type HuffmanDecompressor struct {
 	reader *bitio.BitReader
-	cursor *node
+	cursor *huffmanDecoderNode
 }
 
 // NewHuffmanDecompressor makes a new decompressor, which implements io.Reader.

@@ -1,4 +1,4 @@
-package minhq
+package hpack
 
 type huffmanTableItem struct {
 	len uint8

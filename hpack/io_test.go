@@ -1,11 +1,11 @@
-package minhq_test
+package hpack_test
 
 import (
 	"bytes"
 	"encoding/hex"
 	"testing"
 
-	"github.com/martinthomson/minhq"
+	"github.com/martinthomson/minhq/hpack"
 	"github.com/stvp/assert"
 )
 
@@ -27,7 +27,7 @@ func TestReadIntegers(t *testing.T) {
 	for _, tc := range encodedIntegers {
 		encoded, err := hex.DecodeString(tc.encoded)
 		assert.Nil(t, err)
-		reader := minhq.NewHpackReader(bytes.NewReader(encoded))
+		reader := hpack.NewHpackReader(bytes.NewReader(encoded))
 		if tc.prefix < 8 {
 			b, err := reader.ReadBits(8 - tc.prefix)
 			assert.Nil(t, err)
@@ -42,7 +42,7 @@ func TestReadIntegers(t *testing.T) {
 func TestWriteIntegers(t *testing.T) {
 	for _, tc := range encodedIntegers {
 		var encoded bytes.Buffer
-		writer := minhq.NewHpackWriter(&encoded)
+		writer := hpack.NewHpackWriter(&encoded)
 		if tc.prefix < 8 {
 			err := writer.WriteBits(uint64(0), 8-tc.prefix)
 			assert.Nil(t, err)
@@ -65,9 +65,9 @@ func TestIntegerOverflow(t *testing.T) {
 	for _, tc := range overflowingIntegers {
 		encoded, err := hex.DecodeString(tc)
 		assert.Nil(t, err)
-		reader := minhq.NewHpackReader(bytes.NewReader(encoded))
+		reader := hpack.NewHpackReader(bytes.NewReader(encoded))
 		_, err = reader.ReadInt(8)
-		assert.Equal(t, minhq.ErrIntegerOverflow, err)
+		assert.Equal(t, hpack.ErrIntegerOverflow, err)
 	}
 }
 
@@ -87,7 +87,7 @@ func TestReadString(t *testing.T) {
 	for _, tc := range encodedStrings {
 		encoded, err := hex.DecodeString(tc.encoded)
 		assert.Nil(t, err)
-		reader := minhq.NewHpackReader(bytes.NewReader(encoded))
+		reader := hpack.NewHpackReader(bytes.NewReader(encoded))
 		s, err := reader.ReadString()
 		assert.Nil(t, err)
 		assert.Equal(t, tc.value, s)
@@ -98,15 +98,15 @@ func TestWriteString(t *testing.T) {
 	for _, tc := range encodedStrings {
 		expected, err := hex.DecodeString(tc.encoded)
 		assert.Nil(t, err)
-		var huffman minhq.HuffmanCodingChoice
+		var huffman hpack.HuffmanCodingChoice
 		if (expected[0] & 0x80) == 0 {
-			huffman = minhq.HuffmanCodingNever
+			huffman = hpack.HuffmanCodingNever
 		} else {
-			huffman = minhq.HuffmanCodingAlways
+			huffman = hpack.HuffmanCodingAlways
 		}
 
 		var encoded bytes.Buffer
-		writer := minhq.NewHpackWriter(&encoded)
+		writer := hpack.NewHpackWriter(&encoded)
 		err = writer.WriteStringRaw(tc.value, huffman)
 		assert.Nil(t, err)
 		assert.Equal(t, expected, encoded.Bytes())

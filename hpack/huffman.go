@@ -1,20 +1,22 @@
-package minhq
+package hpack
 
 import (
 	"errors"
 	"io"
+
+	"github.com/martinthomson/minhq/bitio"
 )
 
 // HuffmanCompressor is a progressive compressor for Huffman-encoded data.
 type HuffmanCompressor struct {
-	writer    *BitWriter
+	writer    *bitio.BitWriter
 	saved     byte
 	savedBits byte
 }
 
 // NewHuffmanCompressor wraps the underlying io.Writer.
 func NewHuffmanCompressor(writer io.Writer) *HuffmanCompressor {
-	return &HuffmanCompressor{NewBitWriter(writer), 0, 0}
+	return &HuffmanCompressor{bitio.NewBitWriter(writer), 0, 0}
 }
 
 // Add compresses a string using the Huffman table.  Strings are provided as byte slices.
@@ -86,14 +88,14 @@ func initDecompressorTree() {
 
 // HuffmanDecompressor is the opposite of huffmanCompressor
 type HuffmanDecompressor struct {
-	reader *BitReader
+	reader *bitio.BitReader
 	cursor *node
 }
 
 // NewHuffmanDecompressor makes a new decompressor, which implements io.Reader.
 func NewHuffmanDecompressor(reader io.Reader) *HuffmanDecompressor {
 	initDecompressorTree()
-	return &HuffmanDecompressor{NewBitReader(reader), decompressorTree}
+	return &HuffmanDecompressor{bitio.NewBitReader(reader), decompressorTree}
 }
 
 // Read bytes of input and decode.

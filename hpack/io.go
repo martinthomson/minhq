@@ -1,26 +1,28 @@
-package minhq
+package hpack
 
 import (
 	"bytes"
 	"errors"
 	"io"
+
+	"github.com/martinthomson/minhq/bitio"
 )
 
 // ErrIntegerOverflow is used to signal integer overflow.
 var ErrIntegerOverflow = errors.New("HPACK integer overflow")
 
-// HpackReader wraps BitReader with more methods
-type HpackReader struct {
-	BitReader
+// Reader wraps BitReader with more methods
+type Reader struct {
+	bitio.BitReader
 }
 
 // NewHpackReader wraps the reader with HPACK-specific reading functions.
-func NewHpackReader(reader io.Reader) *HpackReader {
-	return &HpackReader{*NewBitReader(reader)}
+func NewHpackReader(reader io.Reader) *Reader {
+	return &Reader{*bitio.NewBitReader(reader)}
 }
 
 // ReadInt reads an HPACK integer with the specified prefix length.
-func (hr *HpackReader) ReadInt(prefix byte) (uint64, error) {
+func (hr *Reader) ReadInt(prefix byte) (uint64, error) {
 	v, err := hr.ReadBits(prefix)
 	if err != nil {
 		return 0, err
@@ -53,7 +55,7 @@ func (hr *HpackReader) ReadInt(prefix byte) (uint64, error) {
 }
 
 // ReadString reads an HPACK-encoded string.
-func (hr *HpackReader) ReadString() (string, error) {
+func (hr *Reader) ReadString() (string, error) {
 	huffman, err := hr.ReadBit()
 	if err != nil {
 		return "", nil
@@ -81,18 +83,18 @@ func (hr *HpackReader) ReadString() (string, error) {
 	return string(buf), nil
 }
 
-// HpackWriter wraps BitWriter with more methods
-type HpackWriter struct {
-	BitWriter
+// Writer wraps BitWriter with more methods
+type Writer struct {
+	bitio.BitWriter
 }
 
 // NewHpackWriter wraps the writer with HPACK-specific writing functions.
-func NewHpackWriter(writer io.Writer) *HpackWriter {
-	return &HpackWriter{*NewBitWriter(writer)}
+func NewHpackWriter(writer io.Writer) *Writer {
+	return &Writer{*bitio.NewBitWriter(writer)}
 }
 
 // WriteInt writes an integer of the specific prefix length.
-func (hw *HpackWriter) WriteInt(p uint64, prefix byte) error {
+func (hw *Writer) WriteInt(p uint64, prefix byte) error {
 	if prefix > 8 || prefix == 0 {
 		return errors.New("invalid HPACK integer prefix")
 	}
@@ -135,7 +137,7 @@ const (
 )
 
 // WriteStringRaw writes out the specified string.
-func (hw *HpackWriter) WriteStringRaw(s string, huffman HuffmanCodingChoice) error {
+func (hw *Writer) WriteStringRaw(s string, huffman HuffmanCodingChoice) error {
 	var reader io.Reader
 	reader = bytes.NewReader([]byte(s))
 	l := len(s)
@@ -181,6 +183,6 @@ func (hw *HpackWriter) WriteStringRaw(s string, huffman HuffmanCodingChoice) err
 }
 
 // WriteString writes a string, using automatic Huffman coding.
-func (hw *HpackWriter) WriteString(s string) error {
+func (hw *Writer) WriteString(s string) error {
 	return hw.WriteStringRaw(s, HuffmanCodingAuto)
 }

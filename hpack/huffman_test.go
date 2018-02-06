@@ -1,11 +1,11 @@
-package minhq_test
+package hpack_test
 
 import (
 	"bytes"
 	"encoding/hex"
 	"testing"
 
-	"github.com/martinthomson/minhq"
+	"github.com/martinthomson/minhq/hpack"
 	"github.com/stvp/assert"
 )
 
@@ -30,7 +30,7 @@ var tests = []struct {
 func TestHuffmanCompress(t *testing.T) {
 	for _, v := range tests {
 		var buffer bytes.Buffer
-		compressor := minhq.NewHuffmanCompressor(&buffer)
+		compressor := hpack.NewHuffmanCompressor(&buffer)
 
 		n, err := compressor.Write([]byte(v.text))
 		assert.Nil(t, err)
@@ -50,7 +50,7 @@ func TestHuffmanDecompress(t *testing.T) {
 		compressed, err := hex.DecodeString(v.hpack)
 		assert.Nil(t, err)
 		reader := bytes.NewReader(compressed)
-		decompressor := minhq.NewHuffmanDecompressor(reader)
+		decompressor := hpack.NewHuffmanDecompressor(reader)
 
 		decompressed := make([]byte, len(compressed)*2)
 		n, _ := decompressor.Read(decompressed)

@@ -1,4 +1,4 @@
-package minhq
+package hpack
 
 type hpackStaticEntry struct {
 	index int

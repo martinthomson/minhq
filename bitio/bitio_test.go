@@ -1,4 +1,4 @@
-package minhq_test
+package bitio_test
 
 import (
 	"bytes"

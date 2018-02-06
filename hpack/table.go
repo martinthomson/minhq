@@ -1,51 +1,51 @@
-package minhq
+package hpack
 
 import (
 	"errors"
 )
 
-// HpackEntry is a key-value pair for the HPACK table.
-type HpackEntry interface {
+// Entry is a key-value pair for the HPACK table.
+type Entry interface {
 	Name() string
 	Value() string
 	Index() int
 }
 
-// HpackTableCapacity is the type of the HPACK table capacity.
-type HpackTableCapacity uint
+// TableCapacity is the type of the HPACK table capacity.
+type TableCapacity uint
 
-// hpackDynamicEntry is an entry in the dynamic table.
-type hpackDynamicEntry struct {
+// dynamicEntry is an entry in the dynamic table.
+type dynamicEntry struct {
 	name  string
 	value string
-	table *HpackTable
+	table *Table
 	// The insert count at the time that this was added to the table.
 	inserts int
 }
 
-func (hd hpackDynamicEntry) Index() int {
+func (hd dynamicEntry) Index() int {
 	return hd.table.inserts - hd.inserts + len(hpackStaticTable) + 1
 }
 
-func (hd hpackDynamicEntry) Name() string {
+func (hd dynamicEntry) Name() string {
 	return hd.name
 }
-func (hd hpackDynamicEntry) Value() string {
+func (hd dynamicEntry) Value() string {
 	return hd.value
 }
 
-func (hd hpackDynamicEntry) Size() HpackTableCapacity {
-	return HpackTableCapacity(32 + len(hd.Name()) + len(hd.Value()))
+func (hd dynamicEntry) Size() TableCapacity {
+	return TableCapacity(32 + len(hd.Name()) + len(hd.Value()))
 }
 
-// HpackTable holds table entries.
-type HpackTable struct {
-	dynamic []*hpackDynamicEntry
+// Table holds dynamic entries and accounting for space.
+type Table struct {
+	dynamic []*dynamicEntry
 	// The total capacity (in HPACK bytes) of the table. This is set by
 	// configuration.
-	capacity HpackTableCapacity
+	capacity TableCapacity
 	// The amount of used capacity.
-	used HpackTableCapacity
+	used TableCapacity
 	// The total number of inserts thus far.
 	inserts int
 }
@@ -56,12 +56,12 @@ var ErrHpackEntryNotFound = errors.New("HPACK table entry not found")
 
 // Len is the number of entries in the combined table. Note that because
 // HPACK uses a 1-based index, this is the index of the oldest dynamic entry.
-func (table HpackTable) Len() int {
+func (table Table) Len() int {
 	return len(hpackStaticTable) + len(table.dynamic)
 }
 
 // Get an entry from the table.
-func (table HpackTable) Get(i int) HpackEntry {
+func (table Table) Get(i int) Entry {
 	if (i <= 0) || (i > table.Len()) {
 		return nil
 	}
@@ -72,7 +72,7 @@ func (table HpackTable) Get(i int) HpackEntry {
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.
-func (table *HpackTable) evictTo(reduced HpackTableCapacity) {
+func (table *Table) evictTo(reduced TableCapacity) {
 	l := len(table.dynamic)
 	for l > 0 && table.used > reduced {
 		l--
@@ -82,15 +82,15 @@ func (table *HpackTable) evictTo(reduced HpackTableCapacity) {
 }
 
 // Insert an entry into the table.
-func (table *HpackTable) Insert(name string, value string) HpackEntry {
+func (table *Table) Insert(name string, value string) Entry {
 	table.inserts++
-	entry := hpackDynamicEntry{name, value, table, table.inserts}
+	entry := dynamicEntry{name, value, table, table.inserts}
 	if entry.Size() > table.capacity {
 		table.dynamic = table.dynamic[0:0]
 		table.used = 0
 	} else {
 		table.evictTo(table.capacity - entry.Size())
-		tmp := make([]*hpackDynamicEntry, len(table.dynamic)+1)
+		tmp := make([]*dynamicEntry, len(table.dynamic)+1)
 		copy(tmp[1:], table.dynamic)
 		tmp[0] = &entry
 		table.dynamic = tmp
@@ -100,7 +100,7 @@ func (table *HpackTable) Insert(name string, value string) HpackEntry {
 }
 
 // SetCapacity increases or reduces capacity to the set target.
-func (table *HpackTable) SetCapacity(capacity HpackTableCapacity) {
+func (table *Table) SetCapacity(capacity TableCapacity) {
 	table.evictTo(capacity)
 	table.capacity = capacity
 }
@@ -108,8 +108,8 @@ func (table *HpackTable) SetCapacity(capacity HpackTableCapacity) {
 // Lookup looks in the table for a matching name and value. This produces two
 // return values: the first is match on both name and value, which is often nil.
 // The second is a match on name only, which might also be nil.
-func (table HpackTable) Lookup(name string, value string) (HpackEntry, HpackEntry) {
-	var nameOnly HpackEntry
+func (table Table) Lookup(name string, value string) (Entry, Entry) {
+	var nameOnly Entry
 	for i := 1; i <= table.Len(); i++ {
 		entry := table.Get(i)
 		if entry.Name() == name {

@@ -1,4 +1,4 @@
-package minhq
+package hpack
 
 import (
 	"errors"
@@ -22,10 +22,10 @@ type HeaderField struct {
 
 // Decoder is the top-level class for header decompression.
 type Decoder struct {
-	table HpackTable
+	table Table
 }
 
-func (decoder *Decoder) readIndexed(reader *HpackReader) (*HeaderField, error) {
+func (decoder *Decoder) readIndexed(reader *Reader) (*HeaderField, error) {
 	index, err := reader.ReadInt(7)
 	if err != nil {
 		return nil, err
@@ -37,7 +37,7 @@ func (decoder *Decoder) readIndexed(reader *HpackReader) (*HeaderField, error) {
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
 }
 
-func (decoder *Decoder) readNameValue(reader *HpackReader, prefix byte) (string, string, error) {
+func (decoder *Decoder) readNameValue(reader *Reader, prefix byte) (string, string, error) {
 	index, err := reader.ReadInt(prefix)
 	if err != nil {
 		return "", "", err
@@ -62,7 +62,7 @@ func (decoder *Decoder) readNameValue(reader *HpackReader, prefix byte) (string,
 	return name, value, nil
 }
 
-func (decoder *Decoder) readIncremental(reader *HpackReader) (*HeaderField, error) {
+func (decoder *Decoder) readIncremental(reader *Reader) (*HeaderField, error) {
 	name, value, err := decoder.readNameValue(reader, 6)
 	if err != nil {
 		return nil, err
@@ -71,16 +71,16 @@ func (decoder *Decoder) readIncremental(reader *HpackReader) (*HeaderField, erro
 	return &HeaderField{name, value, false}, nil
 }
 
-func (decoder *Decoder) readCapacity(reader *HpackReader) error {
+func (decoder *Decoder) readCapacity(reader *Reader) error {
 	capacity, err := reader.ReadInt(5)
 	if err != nil {
 		return err
 	}
-	decoder.table.SetCapacity(HpackTableCapacity(capacity))
+	decoder.table.SetCapacity(TableCapacity(capacity))
 	return nil
 }
 
-func (decoder *Decoder) readLiteral(reader *HpackReader) (*HeaderField, error) {
+func (decoder *Decoder) readLiteral(reader *Reader) (*HeaderField, error) {
 	ni, err := reader.ReadBit()
 	if err != nil {
 		return nil, err
@@ -165,14 +165,14 @@ func (decoder *Decoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
 
 // Encoder is the top-level class for header compression.
 type Encoder struct {
-	table HpackTable
+	table Table
 	// Track changes to capacity so that we can reflect them properly.
-	minCapacity  HpackTableCapacity
-	nextCapacity HpackTableCapacity
+	minCapacity  TableCapacity
+	nextCapacity TableCapacity
 	indexPrefs   map[string]bool
 }
 
-func (encoder *Encoder) writeCapacity(writer *HpackWriter, c HpackTableCapacity) error {
+func (encoder *Encoder) writeCapacity(writer *Writer, c TableCapacity) error {
 	err := writer.WriteBits(1, 3)
 	if err != nil {
 		return err
@@ -184,7 +184,7 @@ func (encoder *Encoder) writeCapacity(writer *HpackWriter, c HpackTableCapacity)
 	return nil
 }
 
-func (encoder *Encoder) writeCapacityChange(writer *HpackWriter) error {
+func (encoder *Encoder) writeCapacityChange(writer *Writer) error {
 	if encoder.minCapacity < encoder.table.capacity {
 		err := encoder.writeCapacity(writer, encoder.minCapacity)
 		if err != nil {
@@ -202,7 +202,7 @@ func (encoder *Encoder) writeCapacityChange(writer *HpackWriter) error {
 	return nil
 }
 
-func (encoder Encoder) writeIndexed(writer *HpackWriter, entry HpackEntry) error {
+func (encoder Encoder) writeIndexed(writer *Writer, entry Entry) error {
 	err := writer.WriteBit(1)
 	if err != nil {
 		return err
@@ -243,8 +243,8 @@ func (encoder Encoder) avoidIndexing(h HeaderField) bool {
 	return false
 }
 
-func (encoder Encoder) writeIncremental(writer *HpackWriter, h HeaderField,
-	nameEntry HpackEntry) error {
+func (encoder Encoder) writeIncremental(writer *Writer, h HeaderField,
+	nameEntry Entry) error {
 	err := writer.WriteBits(1, 2)
 	if err != nil {
 		return err
@@ -268,8 +268,8 @@ func (encoder Encoder) writeIncremental(writer *HpackWriter, h HeaderField,
 	return writer.WriteString(h.Value)
 }
 
-func (encoder Encoder) writeLiteral(writer *HpackWriter, h HeaderField,
-	nameEntry HpackEntry) error {
+func (encoder Encoder) writeLiteral(writer *Writer, h HeaderField,
+	nameEntry Entry) error {
 	code := uint64(0)
 	if h.Sensitive {
 		code = 1
@@ -336,7 +336,7 @@ func (encoder *Encoder) WriteHeaderBlock(w io.Writer, headers ...HeaderField) er
 // the peer can be set, if there are constraints on memory and the peer isn't
 // trusted to set sane values. Failing to call this will result in no additions
 // to the dynamic table and poor compression performance.
-func (encoder *Encoder) SetCapacity(c HpackTableCapacity) {
+func (encoder *Encoder) SetCapacity(c TableCapacity) {
 	if c < encoder.minCapacity {
 		encoder.minCapacity = c
 	}

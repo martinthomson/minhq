@@ -64,23 +64,22 @@ func (hr *Reader) ReadString() (string, error) {
 	if err != nil {
 		return "", nil
 	}
-	buf := make([]byte, len)
-	n, err := io.ReadFull(hr, buf[0:len])
-	if err != nil {
-		return "", nil
-	}
+	var valueReader io.Reader
+	valueReader = &io.LimitedReader{R: hr, N: int64(len)}
+	var buf []byte
 	if huffman != 0 {
-		dec := NewHuffmanDecompressor(bytes.NewReader(buf))
+		valueReader = NewHuffmanDecompressor(valueReader)
 		// Allocate enough for maximum HPACK expansion.
-		expanded := make([]byte, len*8/5+1)
-		n, err = io.ReadFull(dec, expanded)
-		if err != nil && err != io.ErrUnexpectedEOF {
-			return "", err
-		}
-		buf = expanded[0:n]
+		buf = make([]byte, len*8/5+1)
+	} else {
+		buf = make([]byte, len)
 	}
 
-	return string(buf), nil
+	n, err := io.ReadFull(valueReader, buf)
+	if err != nil && err != io.ErrUnexpectedEOF {
+		return "", err
+	}
+	return string(buf[0:n]), nil
 }
 
 // Writer wraps BitWriter with more methods

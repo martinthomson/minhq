@@ -160,6 +160,8 @@ func (hw *Writer) WriteStringRaw(s string, huffman HuffmanCodingChoice) error {
 			reader = &buf
 			l = buf.Len()
 			hbit = 1
+		} else {
+			reader = bytes.NewReader([]byte(s))
 		}
 	}
 

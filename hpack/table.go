@@ -105,6 +105,11 @@ func (table *Table) SetCapacity(capacity TableCapacity) {
 	table.capacity = capacity
 }
 
+// Used returns the amount of capacity that is in use.
+func (table Table) Used() TableCapacity {
+	return table.used
+}
+
 // Lookup looks in the table for a matching name and value. This produces two
 // return values: the first is match on both name and value, which is often nil.
 // The second is a match on name only, which might also be nil.

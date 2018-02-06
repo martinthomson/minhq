@@ -17,6 +17,7 @@ var encodedIntegers = []struct {
 	{10, "0a", 8},
 	{256, "ff01", 8},
 	{1, "0100", 1},
+	{4096, "1fe11f", 5},
 	{^uint64(0), "ff80feffffffffffffff01", 8},
 	{^uint64(0), "01feffffffffffffffff01", 1},
 	{1 << 63, "ff81feffffffffffff7f", 8},
@@ -81,6 +82,8 @@ var encodedStrings = []struct {
 	{"no-cache", "86a8eb10649cbf"},
 	{"www.example.com", "0f7777772e6578616d706c652e636f6d"},
 	{"www.example.com", "8cf1e3c2e5f23a6ba0ab90f4ff"},
+	{"1", "810f"},
+	{"1", "0131"},
 }
 
 func TestReadString(t *testing.T) {

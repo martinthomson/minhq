@@ -165,7 +165,10 @@ func (decoder *Decoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
 
 // Encoder is the top-level class for header compression.
 type Encoder struct {
-	table Table
+	// Table is public to provide access to its methods.
+	Table Table
+	// HuffmanPreference records preferences for Huffman coding of strings.
+	HuffmanPreference HuffmanCodingChoice
 	// Track changes to capacity so that we can reflect them properly.
 	minCapacity  TableCapacity
 	nextCapacity TableCapacity
@@ -185,24 +188,25 @@ func (encoder *Encoder) writeCapacity(writer *Writer, c TableCapacity) error {
 }
 
 func (encoder *Encoder) writeCapacityChange(writer *Writer) error {
-	if encoder.minCapacity < encoder.table.capacity {
+	if encoder.minCapacity < encoder.Table.capacity {
 		err := encoder.writeCapacity(writer, encoder.minCapacity)
 		if err != nil {
 			return err
 		}
-		encoder.table.SetCapacity(encoder.minCapacity)
+		encoder.Table.SetCapacity(encoder.minCapacity)
 	}
-	if encoder.nextCapacity > encoder.table.capacity {
+	if encoder.nextCapacity > encoder.Table.capacity {
 		err := encoder.writeCapacity(writer, encoder.nextCapacity)
 		if err != nil {
 			return err
 		}
-		encoder.table.SetCapacity(encoder.nextCapacity)
+		encoder.Table.SetCapacity(encoder.nextCapacity)
+		encoder.minCapacity = encoder.nextCapacity
 	}
 	return nil
 }
 
-func (encoder Encoder) writeIndexed(writer *Writer, entry Entry) error {
+func (encoder *Encoder) writeIndexed(writer *Writer, entry Entry) error {
 	err := writer.WriteBit(1)
 	if err != nil {
 		return err
@@ -243,8 +247,7 @@ func (encoder Encoder) avoidIndexing(h HeaderField) bool {
 	return false
 }
 
-func (encoder Encoder) writeIncremental(writer *Writer, h HeaderField,
-	nameEntry Entry) error {
+func (encoder *Encoder) writeIncremental(writer *Writer, h HeaderField, nameEntry Entry) error {
 	err := writer.WriteBits(1, 2)
 	if err != nil {
 		return err
@@ -259,13 +262,18 @@ func (encoder Encoder) writeIncremental(writer *Writer, h HeaderField,
 		return err
 	}
 	if nameEntry == nil {
-		err = writer.WriteString(h.Name)
+		err = writer.WriteStringRaw(h.Name, encoder.HuffmanPreference)
 		if err != nil {
 			return err
 		}
 	}
 
-	return writer.WriteString(h.Value)
+	err = writer.WriteStringRaw(h.Value, encoder.HuffmanPreference)
+	if err != nil {
+		return err
+	}
+	_ = encoder.Table.Insert(h.Name, h.Value)
+	return nil
 }
 
 func (encoder Encoder) writeLiteral(writer *Writer, h HeaderField,
@@ -288,13 +296,13 @@ func (encoder Encoder) writeLiteral(writer *Writer, h HeaderField,
 		return err
 	}
 	if nameEntry == nil {
-		err = writer.WriteString(h.Name)
+		err = writer.WriteStringRaw(h.Name, encoder.HuffmanPreference)
 		if err != nil {
 			return err
 		}
 	}
 
-	return writer.WriteString(h.Value)
+	return writer.WriteStringRaw(h.Value, encoder.HuffmanPreference)
 }
 
 // WriteHeaderBlock writes out a header block.
@@ -314,7 +322,7 @@ func (encoder *Encoder) WriteHeaderBlock(w io.Writer, headers ...HeaderField) er
 		} else {
 			pseudo = false
 		}
-		m, nm := encoder.table.Lookup(name, value)
+		m, nm := encoder.Table.Lookup(name, value)
 		if m != nil {
 			err = encoder.writeIndexed(writer, m)
 		} else {

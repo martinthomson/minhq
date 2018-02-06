@@ -214,7 +214,7 @@ func (encoder *HpackEncoder) writeIndexed(writer *Writer, entry Entry) error {
 	return writer.WriteInt(uint64(entry.Index()), 7)
 }
 
-func (encoder HpackEncoder) avoidIndexing(h HeaderField) bool {
+func (encoder HpackEncoder) shouldIndex(h HeaderField) bool {
 	// Ignore the values here.
 	var dontIndex = map[string]bool{
 		":path":               true,
@@ -234,7 +234,7 @@ func (encoder HpackEncoder) avoidIndexing(h HeaderField) bool {
 	}
 
 	if TableCapacity(len(h.Name)+len(h.Value)+32) > encoder.Table.capacity {
-		return true
+		return false
 	}
 	pref, ok := encoder.indexPrefs[h.Name]
 	if ok {
@@ -242,9 +242,9 @@ func (encoder HpackEncoder) avoidIndexing(h HeaderField) bool {
 	}
 	_, d := dontIndex[h.Name]
 	if d {
-		return true
+		return false
 	}
-	return false
+	return true
 }
 
 func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nameEntry Entry) error {
@@ -331,10 +331,10 @@ func (encoder *HpackEncoder) WriteHeaderBlock(w io.Writer, headers ...HeaderFiel
 			m, nm := encoder.Table.Lookup(name, value)
 			if m != nil {
 				err = encoder.writeIndexed(writer, m)
-			} else if encoder.avoidIndexing(h) {
-				err = encoder.writeLiteral(writer, h, nm)
-			} else {
+			} else if encoder.shouldIndex(h) {
 				err = encoder.writeIncremental(writer, h, nm)
+			} else {
+				err = encoder.writeLiteral(writer, h, nm)
 			}
 		}
 		if err != nil {
@@ -359,6 +359,9 @@ func (encoder *HpackEncoder) SetCapacity(c TableCapacity) {
 // SetIndexPreference sets preferences for header fields with the given name.
 // Set to true to index, false to never index.
 func (encoder *HpackEncoder) SetIndexPreference(name string, pref bool) {
+	if encoder.indexPrefs == nil {
+		encoder.indexPrefs = make(map[string]bool)
+	}
 	encoder.indexPrefs[name] = pref
 }
 

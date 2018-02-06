@@ -166,6 +166,25 @@ var testCases = []struct {
 			{3, ":authority", "www.example.com"},
 		},
 	},
+	{
+		resetTable: true,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "302", Sensitive: false},
+			{Name: "cache-control", Value: "private", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
+			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+		},
+		huffman: true,
+		encoded: "488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a6" +
+			"2d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3",
+		tableSize: 222,
+		dynamicTable: []dynamicTableEntry{
+			{1, "location", "https://www.example.com"},
+			{2, "date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{3, "cache-control", "private"},
+			{4, ":status", "302"},
+		},
+	},
 }
 
 func resetEncoderCapacity(t *testing.T, encoder *hc.HpackEncoder, first bool) {
@@ -195,6 +214,8 @@ func checkDynamicTable(t *testing.T, table *hc.Table, entries []dynamicTableEntr
 func TestHpackEncoder(t *testing.T) {
 	var encoder hc.HpackEncoder
 	resetEncoderCapacity(t, &encoder, true)
+	// The examples in RFC 7541 index date, which is of questionable utility.
+	encoder.SetIndexPreference("date", true)
 
 	for _, tc := range testCases {
 		if tc.resetTable {

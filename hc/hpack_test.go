@@ -211,7 +211,9 @@ var testCases = []struct {
 			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
 			{Name: "location", Value: "https://www.example.com", Sensitive: false},
 			{Name: "content-encoding", Value: "gzip", Sensitive: false},
-			{Name: "set-cookie", Value: "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1", Sensitive: false},
+			{Name: "set-cookie",
+				Value:     "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1",
+				Sensitive: false},
 		},
 		huffman: false,
 		encoded: "88c1611d4d6f6e2c203231204f637420323031332032303a31333a323220474d" +
@@ -270,7 +272,9 @@ var testCases = []struct {
 			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
 			{Name: "location", Value: "https://www.example.com", Sensitive: false},
 			{Name: "content-encoding", Value: "gzip", Sensitive: false},
-			{Name: "set-cookie", Value: "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1", Sensitive: false},
+			{Name: "set-cookie",
+				Value:     "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1",
+				Sensitive: false},
 		},
 		huffman: true,
 		encoded: "88c16196d07abe941054d444a8200595040b8166e084a62d1bffc05a839bd9ab" +

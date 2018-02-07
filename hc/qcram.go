@@ -40,6 +40,7 @@ func (decoder *QcramDecoder) readIncremental(reader *Reader, base int) error {
 		return err
 	}
 	decoder.Table.Insert(name, value)
+	decoder.inserts <- decoder.Table.Base()
 	return nil
 }
 
@@ -53,6 +54,7 @@ func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
 		return ErrIndexError
 	}
 	decoder.Table.Insert(entry.Name(), entry.Value())
+	decoder.inserts <- decoder.Table.Base()
 	return nil
 }
 
@@ -92,7 +94,6 @@ func (decoder *QcramDecoder) ReadTableChanges(r io.Reader) error {
 			return err
 		}
 	}
-	decoder.inserts <- decoder.Table.Base()
 	return nil
 }
 

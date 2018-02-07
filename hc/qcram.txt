@@ -27,6 +27,12 @@ different logic for the different streams. (This is even better if you accept
 that we will use an hq-layer Request ID rather than stream numbers to identify
 requests.)
 
+Honestly, the overhead of framing is excessive here. I found that framing on
+the control stream wasn't necessary. This might depend on implementation
+strategy, because you don't want to read a partial change and have to pickle
+that state so that you can go back to something else, but in my implementation
+I hold that state on the stack, so it's pretty easy.
+
 # Split Instruction Space
 
 Having to check that only certain instructions appear on different streams is
@@ -35,11 +41,11 @@ annoying to implement and a waste of bits. Define two separate spaces.
 # Base in Every HEADERS Frame
 
 It is not explicit enough that the header block prefix is needed on all HEADERS
-frames, including both table modification and request/response streams.
+frames, including both table modification and request/response streams.  But...
 
 # Base on the Table Update Stream
 
-You don't need base on this stream.  It is actually a hazard.
+You don't need base on this stream.  It is more of a hazard than a help.
 
 # Remove BLOCKING
 
@@ -66,7 +72,8 @@ zero.
 
 This follows from preferring to use the smallest value for base possible. Doing
 that also keeps table references as small as possible. (Because references are
-counted in the opposite direction to base.)
+counted in the opposite direction to base, a larger base means larger
+references.)
 
 The cost is that you have to do a two pass check: the first to find the oldest
 reference, the second to write out the header block. I find that it's basically
@@ -74,5 +81,13 @@ necessary to do two passes anyway: on the first I write out the table updates,
 on the second I write the header block. During that phase you want to do
 lookups anyway, so you can save the based from that pass.
 
+# Tracking ACKs is Harder Than It Seems
 
+There are multiple header blocks per stream, and ACKs only hit the first. You
+can't just store a stream reference (or Request-ID) against each header block,
+you have to store a tuple of stream and header block index. This needs to be
+explained somewhere.
 
+# Acknowledge Dmitry
+
+Dmitry did a lot of work on the design team.

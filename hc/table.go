@@ -59,6 +59,10 @@ type Table struct {
 	used TableCapacity
 	// The total number of inserts thus far.
 	inserts int
+
+	// TODO: Use this to ensure that reads and writes synchronize properly
+	//
+	// mutex sync.RWMutex
 }
 
 // ErrHpackEntryNotFound indicates that a reference was made outside of the
@@ -67,17 +71,17 @@ var ErrHpackEntryNotFound = errors.New("HPACK table entry not found")
 
 // Len is the number of entries in the combined table. Note that because
 // HPACK uses a 1-based index, this is the index of the oldest dynamic entry.
-func (table Table) Len() int {
+func (table *Table) Len() int {
 	return len(staticTable) + len(table.dynamic)
 }
 
 // Get an entry from the table.
-func (table Table) Get(i int) Entry {
-	return table.GetBase(i, table.Base())
+func (table *Table) Get(i int) Entry {
+	return table.GetWithBase(i, table.Base())
 }
 
-// GetBase retrieves an entry relative to the specified base.
-func (table Table) GetBase(i int, base int) Entry {
+// GetWithBase retrieves an entry relative to the specified base.
+func (table *Table) GetWithBase(i int, base int) Entry {
 	if i <= 0 {
 		return nil
 	}
@@ -126,19 +130,19 @@ func (table *Table) SetCapacity(capacity TableCapacity) {
 }
 
 // Used returns the amount of capacity that is in use.
-func (table Table) Used() TableCapacity {
+func (table *Table) Used() TableCapacity {
 	return table.used
 }
 
 // Base returns the current base for the table, which is the number of inserts.
-func (table Table) Base() int {
+func (table *Table) Base() int {
 	return table.inserts
 }
 
 // Lookup looks in the table for a matching name and value. This produces two
 // return values: the first is match on both name and value, which is often nil.
 // The second is a match on name only, which might also be nil.
-func (table Table) Lookup(name string, value string) (Entry, Entry) {
+func (table *Table) Lookup(name string, value string) (Entry, Entry) {
 	var nameMatch Entry
 	for _, entry := range staticTable {
 		if entry.Name() == name {

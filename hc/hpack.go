@@ -205,8 +205,7 @@ func (encoder *HpackEncoder) WriteHeaderBlock(w io.Writer, headers ...HeaderFiel
 	}
 	pseudo := true
 	for _, h := range headers {
-		name, value := h.Name, h.Value
-		if name[0] == ':' {
+		if h.Name[0] == ':' {
 			if !pseudo {
 				return ErrPseudoHeaderOrdering
 			}
@@ -220,7 +219,7 @@ func (encoder *HpackEncoder) WriteHeaderBlock(w io.Writer, headers ...HeaderFiel
 			// behaviour.
 			err = encoder.writeLiteral(writer, h, nil)
 		} else {
-			m, nm := encoder.Table.Lookup(name, value)
+			m, nm := encoder.Table.Lookup(h.Name, h.Value)
 			if m != nil {
 				err = encoder.writeIndexed(writer, m)
 			} else if encoder.shouldIndex(h) {

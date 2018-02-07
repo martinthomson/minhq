@@ -34,7 +34,7 @@ func (decoder *decoderCommon) readNameValue(reader *Reader, prefix byte, base in
 			return "", "", err
 		}
 	} else {
-		entry := decoder.Table.GetBase(index, base)
+		entry := decoder.Table.GetWithBase(index, base)
 		if entry == nil {
 			return "", "", ErrIndexError
 		}

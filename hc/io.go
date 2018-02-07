@@ -9,7 +9,7 @@ import (
 )
 
 // ErrIntegerOverflow is used to signal integer overflow.
-var ErrIntegerOverflow = errors.New("HPACK integer overflow")
+var ErrIntegerOverflow = errors.New("integer overflow")
 
 // Reader wraps BitReader with more methods
 type Reader struct {

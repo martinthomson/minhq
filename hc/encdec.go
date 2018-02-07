@@ -22,8 +22,8 @@ type decoderCommon struct {
 	Table Table
 }
 
-func (decoder *decoderCommon) readNameValue(reader *Reader, prefix byte) (string, string, error) {
-	index, err := reader.ReadInt(prefix)
+func (decoder *decoderCommon) readNameValue(reader *Reader, prefix byte, base int) (string, string, error) {
+	index, err := reader.ReadOffset(prefix)
 	if err != nil {
 		return "", "", err
 	}
@@ -34,7 +34,7 @@ func (decoder *decoderCommon) readNameValue(reader *Reader, prefix byte) (string
 			return "", "", err
 		}
 	} else {
-		entry := decoder.Table.Get(int(index))
+		entry := decoder.Table.GetBase(index, base)
 		if entry == nil {
 			return "", "", ErrIndexError
 		}
@@ -94,10 +94,10 @@ func (encoder encoderCommon) shouldIndex(h HeaderField) bool {
 // Write out a name/value pair to the specified writer, with the specified
 // integer prefix size on the name index.
 func (encoder encoderCommon) writeNameValue(writer *Writer, h HeaderField,
-	nameEntry Entry, prefix byte) error {
+	nameEntry Entry, prefix byte, base int) error {
 	nameIndex := uint64(0)
 	if nameEntry != nil {
-		nameIndex = uint64(nameEntry.Index())
+		nameIndex = uint64(nameEntry.Index(base))
 	}
 	err := writer.WriteInt(nameIndex, prefix)
 	if err != nil {

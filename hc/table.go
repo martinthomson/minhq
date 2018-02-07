@@ -8,7 +8,7 @@ import (
 type Entry interface {
 	Name() string
 	Value() string
-	Index() int
+	Index(base int) int
 }
 
 // TableCapacity is the type of the HPACK table capacity.
@@ -18,13 +18,20 @@ type TableCapacity uint
 type dynamicEntry struct {
 	name  string
 	value string
-	table *Table
 	// The insert count at the time that this was added to the table.
 	inserts int
 }
 
-func (hd dynamicEntry) Index() int {
-	return hd.table.inserts - hd.inserts + len(staticTable) + 1
+func (hd dynamicEntry) Index(base int) int {
+	delta := base - hd.inserts
+	if delta < 0 {
+		// If base < inserts, then this entry was added after the base and the index
+		// will be invalid. Return 0.
+		return 0
+	}
+	// If base > inserts, then this entry was added before the base was set. The
+	// index is be valid.
+	return len(staticTable) + 1 + delta
 }
 
 func (hd dynamicEntry) Name() string {
@@ -36,6 +43,10 @@ func (hd dynamicEntry) Value() string {
 
 func (hd dynamicEntry) Size() TableCapacity {
 	return TableCapacity(32 + len(hd.Name()) + len(hd.Value()))
+}
+
+func (hd dynamicEntry) Base() int {
+	return hd.inserts
 }
 
 // Table holds dynamic entries and accounting for space.
@@ -62,13 +73,22 @@ func (table Table) Len() int {
 
 // Get an entry from the table.
 func (table Table) Get(i int) Entry {
-	if (i <= 0) || (i > table.Len()) {
+	return table.GetBase(i, table.Base())
+}
+
+// GetBase retrieves an entry relative to the specified base.
+func (table Table) GetBase(i int, base int) Entry {
+	if i <= 0 {
 		return nil
 	}
 	if i <= len(staticTable) {
 		return staticTable[i-1]
 	}
-	return table.dynamic[i-len(staticTable)-1]
+	dynIndex := i - len(staticTable) - 1 + table.Base() - base
+	if dynIndex >= len(table.dynamic) {
+		return nil
+	}
+	return table.dynamic[dynIndex]
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.
@@ -84,7 +104,7 @@ func (table *Table) evictTo(reduced TableCapacity) {
 // Insert an entry into the table.
 func (table *Table) Insert(name string, value string) Entry {
 	table.inserts++
-	entry := dynamicEntry{name, value, table, table.inserts}
+	entry := dynamicEntry{name, value, table.inserts}
 	if entry.Size() > table.capacity {
 		table.dynamic = table.dynamic[0:0]
 		table.used = 0
@@ -110,21 +130,35 @@ func (table Table) Used() TableCapacity {
 	return table.used
 }
 
+// Base returns the current base for the table, which is the number of inserts.
+func (table Table) Base() int {
+	return table.inserts
+}
+
 // Lookup looks in the table for a matching name and value. This produces two
 // return values: the first is match on both name and value, which is often nil.
 // The second is a match on name only, which might also be nil.
 func (table Table) Lookup(name string, value string) (Entry, Entry) {
-	var nameOnly Entry
-	for i := 1; i <= table.Len(); i++ {
-		entry := table.Get(i)
+	var nameMatch Entry
+	for _, entry := range staticTable {
 		if entry.Name() == name {
 			if entry.Value() == value {
 				return entry, entry
 			}
-			if nameOnly == nil {
-				nameOnly = entry
+			if nameMatch == nil {
+				nameMatch = entry
 			}
 		}
 	}
-	return nil, nameOnly
+	for _, entry := range table.dynamic {
+		if entry.Name() == name {
+			if entry.Value() == value {
+				return entry, entry
+			}
+			if nameMatch == nil {
+				nameMatch = entry
+			}
+		}
+	}
+	return nil, nameMatch
 }

@@ -23,7 +23,7 @@ type decoderCommon struct {
 }
 
 func (decoder *decoderCommon) readNameValue(reader *Reader, prefix byte, base int) (string, string, error) {
-	index, err := reader.ReadOffset(prefix)
+	index, err := reader.ReadIndex(prefix)
 	if err != nil {
 		return "", "", err
 	}

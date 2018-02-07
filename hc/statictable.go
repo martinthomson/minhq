@@ -6,7 +6,7 @@ type staticTableEntry struct {
 	value string
 }
 
-func (hse staticTableEntry) Index() int {
+func (hse staticTableEntry) Index(int) int {
 	return hse.index
 }
 

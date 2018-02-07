@@ -10,11 +10,11 @@ type HpackDecoder struct {
 }
 
 func (decoder *HpackDecoder) readIndexed(reader *Reader) (*HeaderField, error) {
-	index, err := reader.ReadInt(7)
+	index, err := reader.ReadIndex(7)
 	if err != nil {
 		return nil, err
 	}
-	entry := decoder.Table.Get(int(index))
+	entry := decoder.Table.Get(index)
 	if entry == nil {
 		return nil, ErrIndexError
 	}
@@ -22,7 +22,7 @@ func (decoder *HpackDecoder) readIndexed(reader *Reader) (*HeaderField, error) {
 }
 
 func (decoder *HpackDecoder) readIncremental(reader *Reader) (*HeaderField, error) {
-	name, value, err := decoder.readNameValue(reader, 6)
+	name, value, err := decoder.readNameValue(reader, 6, decoder.Table.Base())
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func (decoder *HpackDecoder) readLiteral(reader *Reader) (*HeaderField, error) {
 		return nil, err
 	}
 
-	name, value, err := decoder.readNameValue(reader, 4)
+	name, value, err := decoder.readNameValue(reader, 4, decoder.Table.Base())
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func (encoder *HpackEncoder) writeIndexed(writer *Writer, entry Entry) error {
 	if err != nil {
 		return err
 	}
-	return writer.WriteInt(uint64(entry.Index()), 7)
+	return writer.WriteInt(uint64(entry.Index(encoder.Table.Base())), 7)
 }
 
 func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nameEntry Entry) error {
@@ -175,7 +175,7 @@ func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nam
 		return err
 	}
 
-	err = encoder.writeNameValue(writer, h, nameEntry, 6)
+	err = encoder.writeNameValue(writer, h, nameEntry, 6, encoder.Table.Base())
 	if err != nil {
 		return err
 	}
@@ -193,7 +193,7 @@ func (encoder HpackEncoder) writeLiteral(writer *Writer, h HeaderField, nameEntr
 		return err
 	}
 
-	return encoder.writeNameValue(writer, h, nameEntry, 4)
+	return encoder.writeNameValue(writer, h, nameEntry, 4, encoder.Table.Base())
 }
 
 // WriteHeaderBlock writes out a header block.

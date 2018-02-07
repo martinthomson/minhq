@@ -54,6 +54,19 @@ func (hr *Reader) ReadInt(prefix byte) (uint64, error) {
 	return v, nil
 }
 
+// ReadIndex reads out an integer. This is a wrapper on ReadInt that validates
+// that the returned value fits properly in an int.
+func (hr *Reader) ReadIndex(prefix byte) (int, error) {
+	offset, err := hr.ReadInt(prefix)
+	if err != nil {
+		return 0, err
+	}
+	if offset > uint64(int(^uint(0)>>1)) {
+		return 0, ErrIntegerOverflow
+	}
+	return int(offset), nil
+}
+
 // ReadString reads an HPACK-encoded string.
 func (hr *Reader) ReadString() (string, error) {
 	huffman, err := hr.ReadBit()

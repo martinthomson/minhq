@@ -1,0 +1,78 @@
+__Issues with QCRAM__
+
+# Separate Stream Roles
+
+There are actually three streams of data that are of interest, and there is no
+clarity about those streams. 
+
+1. I suggest that we use unidirectional streams in each direction for table
+updates.
+
+2. A separate stream for acknowledgments ensures that the encoder can consume
+that separately to the decoder.
+
+3. Request/response streams. The definition of this is mostly OK.
+
+These can be separate from the hq control stream, and they should be. Rather
+than pick a specific stream number, we should add a header for these streams
+that will allow them to be identified clearly. If we do that, add strict rules
+about cardinality.
+
+# Define Framing More Clearly
+
+The definition of the framing that is used on the control stream is sloppy. The
+assumption is that HEADERS frames are used, but that needs to be a lot clearer.
+If you take the suggestion for separate framing, then you can use very
+different logic for the different streams. (This is even better if you accept
+that we will use an hq-layer Request ID rather than stream numbers to identify
+requests.)
+
+# Split Instruction Space
+
+Having to check that only certain instructions appear on different streams is
+annoying to implement and a waste of bits. Define two separate spaces.
+
+# Base in Every HEADERS Frame
+
+It is not explicit enough that the header block prefix is needed on all HEADERS
+frames, including both table modification and request/response streams.
+
+# Base on the Table Update Stream
+
+You don't need base on this stream.  It is actually a hazard.
+
+# Remove BLOCKING
+
+The BLOCKING flag complicates the design unnecessarily. As a fixed overhead,
+pay the extra byte always. Furthermore, the table update stream will never need
+to use depends, so that further motivates having different instruction sets
+(and formats) for different streams.
+
+See below for more on this.
+
+# Base and the Static Table
+
+It is not explained at all that the base is applied to the dynamic table only.
+That is, index 1 is a straight index into the static table and that index 62
+will use the current number of inserts and the base to determine the actual
+index into the dynamic table (this is the first table entry only when the
+number of table inserts and base are the same, if the base is smaller, then it
+will be further along the table).
+
+# Remove Depends
+
+Depends is useless. When implementing this, I found that I always set this to
+zero.
+
+This follows from preferring to use the smallest value for base possible. Doing
+that also keeps table references as small as possible. (Because references are
+counted in the opposite direction to base.)
+
+The cost is that you have to do a two pass check: the first to find the oldest
+reference, the second to write out the header block. I find that it's basically
+necessary to do two passes anyway: on the first I write out the table updates,
+on the second I write the header block. During that phase you want to do
+lookups anyway, so you can save the based from that pass.
+
+
+

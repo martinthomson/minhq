@@ -33,10 +33,13 @@ func (e *qcramEntry) Size() TableCapacity {
 }
 
 // QcramDecoder is the top-level class for header decompression.
+// This is intended to be concurrency-safe for reading of header blocks
+// (ReadHeaderBlock), but the reading of table updates (ReadTableChanges) can
+// only run on one thread at a time.
 type QcramDecoder struct {
 	decoderCommon
 	// This is used to notify any waiting readers that new table entries are
-	// available.
+	// availa	ble.
 	insertCondition *sync.Cond
 }
 
@@ -81,8 +84,8 @@ func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
 	return nil
 }
 
-// ReadTableChanges reads inserts to the table.
-func (decoder *QcramDecoder) ReadTableChanges(r io.Reader) error {
+// ReadTableUpdates reads inserts to the table.
+func (decoder *QcramDecoder) ReadTableUpdates(r io.Reader) error {
 	reader := NewReader(r)
 
 	base := decoder.Table.Base()
@@ -210,11 +213,54 @@ func (decoder *QcramDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 
 type qcramEncoderEntry struct {
 	qcramEntry
-	unacknowledged list.List
+	uses list.List
 }
 
 func makeQcramEncoderEntry(name string, value string) DynamicEntry {
 	return &qcramEncoderEntry{qcramEntry{BasicDynamicEntry{name, value, 0}}, list.List{}}
+}
+
+func (qe *qcramEncoderEntry) addUse(token interface{}) {
+	qe.uses.PushBack(token)
+}
+
+func (qe *qcramEncoderEntry) removeUse(token interface{}) {
+	for e := qe.uses.Front(); e != nil; e = e.Next() {
+		if e.Value == token {
+			qe.uses.Remove(e)
+			return
+		}
+	}
+}
+
+func (qe *qcramEncoderEntry) inUse() bool {
+	return qe.uses.Len() > 0
+}
+
+// The number of referenceable entries in the dynamic table.
+type referenceableEntries struct {
+	// The amount of table capacity we will actively use.
+	margin TableCapacity
+	// The number of entries we can use right now.
+	count int
+	// The size of those usable entries.
+	size TableCapacity
+}
+
+func (ref *referenceableEntries) added(dynamic []DynamicEntry, increase TableCapacity) {
+	updatedSize := ref.size + increase
+	i := ref.count + 1
+	for updatedSize > ref.margin {
+		i--
+		updatedSize -= dynamic[i].Size()
+	}
+	ref.count = i
+	ref.size = updatedSize
+}
+
+func (ref *referenceableEntries) removed(reduction TableCapacity) {
+	ref.count--
+	ref.size -= reduction
 }
 
 // This is used by the writer to track which table entries are needed to write
@@ -227,15 +273,20 @@ type qcramWriterState struct {
 	// Track the largest and smallest base that we use. Largest so that we can set
 	// the base on the header block; smallest so that we can prevent that from
 	// being evicted.
-	largestBase  int
-	smallestBase int
+	largestBase   int
+	smallestBase  int
+	referenceable *referenceableEntries
+
+	token interface{}
 }
 
-func (state *qcramWriterState) init(headers []HeaderField) {
+func (state *qcramWriterState) init(headers []HeaderField, referenceable *referenceableEntries, token interface{}) {
 	state.headers = headers
 	state.matches = make([]Entry, len(headers))
 	state.nameMatches = make([]Entry, len(headers))
 	state.smallestBase = int(^uint(0) >> 1)
+	state.referenceable = referenceable
+	state.token = token
 }
 
 func (state *qcramWriterState) updateBase(e Entry, match bool) {
@@ -258,20 +309,68 @@ func (state *qcramWriterState) CanEvict(e DynamicEntry) bool {
 	if e.Base() == state.smallestBase {
 		return false
 	}
-	dyn := e.(*qcramEncoderEntry)
-	return dyn.unacknowledged.Len() == 0
+	qe := e.(*qcramEncoderEntry)
+	if qe.inUse() {
+		return false
+	}
+	state.referenceable.removed(qe.Size())
+	return true
 }
 
-// QcramEncoder is the top-level class for header compression.
+func (state *qcramWriterState) addUse(i int) {
+	e := state.matches[i]
+	if e == nil {
+		e = state.nameMatches[i]
+	}
+	if e == nil {
+		return
+	}
+	qe, ok := e.(*qcramEncoderEntry)
+	if ok {
+		qe.addUse(state.token)
+	}
+}
+
+// QcramEncoder performs header compression using QCRAM. This is not a
+// thread-safe object, all writes need to be serialized.
 type QcramEncoder struct {
 	encoderCommon
+	referenceable referenceableEntries
 }
 
 // NewQcramEncoder creates a new QcramEncoder and sets it up.
-func NewQcramEncoder(c TableCapacity) *QcramEncoder {
+// `capacity` is the capacity of the table. `margin` is the amount of capacity
+// that the encoder will actively use. Dynamic table entries inside of `margin`
+// will be referenced, those outside will not be.
+func NewQcramEncoder(capacity TableCapacity, margin TableCapacity) *QcramEncoder {
 	encoder := new(QcramEncoder)
-	setCapacity(&encoder.Table, c)
+	setCapacity(&encoder.Table, capacity)
+	encoder.referenceable.margin = margin
 	return encoder
+}
+
+// writeDuplicate duplicates the indicated entry.
+func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, state *qcramWriterState, i int, base int) error {
+	copy := makeQcramEncoderEntry(entry.Name(), entry.Value())
+	inserted := encoder.Table.Insert(copy, state)
+	if !inserted {
+		// Leaving h unmodified causes a literal to be written.
+		return nil
+	}
+	encoder.referenceable.added(encoder.Table.dynamic, copy.Size())
+
+	err := writer.WriteBits(1, 3)
+	if err != nil {
+		return err
+	}
+	err = writer.WriteInt(uint64(entry.Index(base)), 5)
+	if err != nil {
+		return err
+	}
+
+	state.matches[i] = copy
+	state.updateBase(copy, true)
+	return nil
 }
 
 // writeInsert writes the entry at state.xxx[i] to the control stream.
@@ -283,16 +382,17 @@ func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState
 		// Leaving h unmodified causes a literal to be written.
 		return nil
 	}
+	encoder.referenceable.added(encoder.Table.dynamic, entry.Size())
 
 	err := writer.WriteBits(1, 2)
 	if err != nil {
 		return err
 	}
-
 	err = encoder.writeNameValue(writer, h, state.nameMatches[i], 6, base)
 	if err != nil {
 		return err
 	}
+
 	state.matches[i] = entry
 	state.updateBase(entry, true)
 	return nil
@@ -311,28 +411,31 @@ func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *q
 		if h.Sensitive {
 			continue
 		}
-		m, nm := encoder.Table.Lookup(h.Name, h.Value)
-		// TODO decide what needs duplicating based on an eviction threshold.
-
-		// TODO we should stop inserting and duplicating if our first insert is at
-		// risk of eviction. Unlike HPACK we can't roll the entire table for every
-		// header block.
+		m, nm := encoder.Table.lookupLimited(h.Name, h.Value, encoder.referenceable.count)
 		if m != nil {
 			state.matches[i] = m
 			state.updateBase(m, true)
-		} else {
-			state.nameMatches[i] = nm
-			if encoder.shouldIndex(h) {
-				err := encoder.writeInsert(w, state, i, base)
-				if err != nil {
-					return err
-				}
-				state.largestBase = encoder.Table.Base()
-			} else {
-				state.updateBase(nm, false)
-			}
+			continue
 		}
 
+		md := encoder.Table.lookupDynamic(h.Name, h.Value, encoder.referenceable.count)
+		if md != nil {
+			err := encoder.writeDuplicate(w, md, state, i, base)
+			if err != nil {
+				return err
+			}
+			continue
+		}
+
+		state.nameMatches[i] = nm
+		if encoder.shouldIndex(h) {
+			err := encoder.writeInsert(w, state, i, base)
+			if err != nil {
+				return err
+			}
+		} else {
+			state.updateBase(nm, false)
+		}
 	}
 	return nil
 }
@@ -342,6 +445,7 @@ func (encoder *QcramEncoder) writeIndexed(writer *Writer, state *qcramWriterStat
 	if err != nil {
 		return err
 	}
+	state.addUse(i)
 	return writer.WriteInt(uint64(state.matches[i].Index(state.largestBase)), 7)
 }
 
@@ -407,14 +511,19 @@ func (encoder *QcramEncoder) clearEvictedMatches(entries []Entry) {
 }
 
 // WriteHeaderBlock writes out a header block.  controlWriter is the control stream writer
-func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWriter io.Writer, headers ...HeaderField) error {
+// `token` is a token that is used to identify this header block. The caller
+// needs to pick a token that is unique among the tokens that are currently
+// unacknowledged. Using the same token twice without first acknowledging it can
+// result in errors.
+func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWriter io.Writer,
+	token interface{}, headers ...HeaderField) error {
 	err := validatePseudoHeaders(headers)
 	if err != nil {
 		return err
 	}
 
 	var state qcramWriterState
-	state.init(headers)
+	state.init(headers, &encoder.referenceable, token)
 	err = encoder.writeTableChanges(controlWriter, &state)
 	if err != nil {
 		return err
@@ -424,4 +533,14 @@ func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWri
 	encoder.clearEvictedMatches(state.nameMatches)
 
 	return encoder.writeHeaderBlock(headerWriter, &state)
+}
+
+// Acknowledged is called when a header block has been acknowledged by the peer.
+// This allows dynamic table entries to be evicted as necessary on the next
+// call.
+func (encoder *QcramEncoder) Acknowledged(token interface{}) {
+	for _, e := range encoder.Table.dynamic {
+		qe := e.(*qcramEncoderEntry)
+		qe.removeUse(token)
+	}
 }

@@ -12,12 +12,21 @@ import (
 
 func TestQcramEncoder(t *testing.T) {
 	var encoder *hc.QcramEncoder
+	token := "k"
 
 	for _, tc := range testCases {
 		if tc.resetTable {
-			encoder = hc.NewQcramEncoder(256)
+			encoder = hc.NewQcramEncoder(256, 256)
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
+		} else {
+			// We can use the same token here because always acknowledge before encoding
+			// the next block.
+			encoder.Acknowledged(token)
+		}
+
+		if tc.hpack == "828684be58086e6f2d6361636865" {
+			fmt.Println("testing")
 		}
 
 		if tc.huffman {
@@ -28,7 +37,7 @@ func TestQcramEncoder(t *testing.T) {
 
 		var controlBuf bytes.Buffer
 		var headerBuf bytes.Buffer
-		err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, tc.headers...)
+		err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, tc.headers...)
 		assert.Nil(t, err)
 
 		fmt.Println("control", hex.EncodeToString(controlBuf.Bytes()))
@@ -67,7 +76,7 @@ func TestQcramDecoderOrdered(t *testing.T) {
 		if len(tc.qcramControl) > 0 {
 			control, err := hex.DecodeString(tc.qcramControl)
 			assert.Nil(t, err)
-			err = decoder.ReadTableChanges(bytes.NewReader(control))
+			err = decoder.ReadTableUpdates(bytes.NewReader(control))
 			assert.Nil(t, err)
 		}
 

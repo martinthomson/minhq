@@ -98,6 +98,15 @@ The draft has a TODO about overhead for each dynamic entry. I added a field to
 every entry that allows it to know its own base, but that is a simplification
 in my code, you don't need that. The other overheads are all fixed. I don't
 think that we need to change from 32. This decision would reduce code
-complexity in my implementation because dynamic table entries now have two
-implementations just to account for this possibility.
+complexity (well, in my implementation anyway) because dynamic table entries
+now have two implementations just to account for this possibility.
+
+# Duplication
+
+This only makes sense for dynamic entries and yet the index is (I assume), the
+normal table index. That is suboptimal. This is worse because the prefix is
+only 5 bits for this instruction (up to 62 values), which leads to the encoding
+taking an extra byte (only one dynamic table entry has an index of 62). If you
+take my suggestion for separate instruction spaces, this is better, but still
+not as good as a direct index into the dynamic table, starting at 0.
 

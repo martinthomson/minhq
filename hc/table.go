@@ -163,9 +163,21 @@ func (table *Table) Base() int {
 	return table.base
 }
 
-func (table *Table) lookupStatic(name string, value string) (Entry, Entry) {
+// LookupLimited looks in the table for a matching name and value. It only looks at the
+// first `dynamicLimit` values from the dynamic table though.
+func (table *Table) lookupLimited(name string, value string, dynamicLimit int) (Entry, Entry) {
 	var nameMatch Entry
 	for _, entry := range staticTable {
+		if entry.Name() == name {
+			if entry.Value() == value {
+				return entry, entry
+			}
+			if nameMatch == nil {
+				nameMatch = entry
+			}
+		}
+	}
+	for _, entry := range table.dynamic[0:dynamicLimit] {
 		if entry.Name() == name {
 			if entry.Value() == value {
 				return entry, entry
@@ -182,19 +194,18 @@ func (table *Table) lookupStatic(name string, value string) (Entry, Entry) {
 // return values: the first is match on both name and value, which is often nil.
 // The second is a match on name only, which might also be nil.
 func (table *Table) Lookup(name string, value string) (Entry, Entry) {
-	match, nameMatch := table.lookupStatic(name, value)
-	if match != nil {
-		return match, nameMatch
-	}
-	for _, entry := range table.dynamic {
+	return table.lookupLimited(name, value, len(table.dynamic))
+}
+
+// LookupDynamic looks in the table for a dynamic entry after the provided
+// offset. It is design for use after lookupLimited() fails.
+func (table *Table) lookupDynamic(name string, value string, offset int) DynamicEntry {
+	for _, entry := range table.dynamic[offset:] {
 		if entry.Name() == name {
 			if entry.Value() == value {
-				return entry, entry
-			}
-			if nameMatch == nil {
-				nameMatch = entry
+				return entry
 			}
 		}
 	}
-	return nil, nameMatch
+	return nil
 }

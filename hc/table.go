@@ -121,9 +121,6 @@ func (table *Table) evictTo(reduced TableCapacity, evict evictionCheck) bool {
 
 // Insert an entry into the table.  Return nil if the entry couldn't be added.
 func (table *Table) Insert(entry DynamicEntry, evict evictionCheck) bool {
-	table.base++
-	entry.setBase(table.Base())
-
 	if entry.Size() > table.capacity {
 		if table.evictTo(0, evict) {
 			table.dynamic = table.dynamic[0:0]
@@ -135,6 +132,9 @@ func (table *Table) Insert(entry DynamicEntry, evict evictionCheck) bool {
 	if !table.evictTo(table.capacity-entry.Size(), evict) {
 		return false
 	}
+
+	table.base++
+	entry.setBase(table.Base())
 
 	// TODO This is grossly inefficient. Indexing from the other end might be less
 	// bad, especially if the underlying array is made a little bigger than needed

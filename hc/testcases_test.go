@@ -291,8 +291,8 @@ var testCases = []struct {
 			},
 		},
 		qcramControl: "",
-		qcramHeader: "0888c40f121d4d6f6e2c203231204f637420323031332032303a31333a323220474d" +
-			"54c20f0b04677a69700f2838666f6f3d4153444a4b48514b425a584f5157454f5049" +
+		qcramHeader: "0588c10f121d4d6f6e2c203231204f637420323031332032303a31333a323220474d" +
+			"54bf0f0b04677a69700f2838666f6f3d4153444a4b48514b425a584f5157454f5049" +
 			"5541585157454f49553b206d61782d6167653d333630303b2076657273696f6e" +
 			"3d31",
 		qcramTable: &tableState{
@@ -375,10 +375,10 @@ var testCases = []struct {
 				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 			},
 		},
-		qcramControl: "6196d07abe941054d444a8200595040b8166e084a62d1bff5a839bd9ab" +
-			"77ad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1ab270fb5291f" +
-			"9587316065c003ed4ee5b1063d5007",
-		qcramHeader: "0888c4c0c2bfbe",
+		qcramControl: "",
+		qcramHeader: "05" + "88c1" + "0f1296d07abe941054d444a8200595040b8166e084a62d1bff" +
+			"bf" + "0f0b839bd9ab" + "0f28ad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1ab27" +
+			"0fb5291f9587316065c003ed4ee5b1063d5007",
 		qcramTable: &tableState{
 			size: 222,
 			entries: []tableStateEntry{
@@ -391,35 +391,41 @@ var testCases = []struct {
 	},
 	// Using existing values in the dynamic table revealed a bug in QCRAM.
 	{
+		resetTable: true,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "200", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
+			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+		},
+		huffman: true,
+		hpack:   "886196d07abe941054d444a8200595040b8166e084a62d1bff5a839bd9ab",
+		hpackTable: tableState{
+			size: 117,
+			entries: []tableStateEntry{
+				{"content-encoding", "gzip"},
+				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+			},
+		},
+		qcramControl: "6196d07abe941054d444a8200595040b8166e084a62d1bff5a839bd9ab",
+		qcramHeader:  "0288bfbe",
+	},
+	{
 		resetTable: false,
 		headers: []hc.HeaderField{
 			{Name: ":status", Value: "200", Sensitive: false},
 			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
 			{Name: "content-encoding", Value: "gzip", Sensitive: false},
-			{Name: "set-cookie",
-				Value:     "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1",
-				Sensitive: false},
 		},
 		huffman: true,
-		hpack:   "88c0bfbe",
+		hpack:   "88bfbe",
 		hpackTable: tableState{
-			size: 215,
+			size: 117,
 			entries: []tableStateEntry{
-				{"set-cookie", "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1"},
 				{"content-encoding", "gzip"},
 				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 			},
 		},
 		qcramControl: "",
-		qcramHeader:  "0888c0bfbe",
-		qcramTable: &tableState{
-			size: 222,
-			entries: []tableStateEntry{
-				{":status", "307"},
-				{"location", "https://www.example.com"},
-				{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
-				{"cache-control", "private"},
-			},
-		},
+		qcramHeader:  "0288bfbe",
 	},
 }

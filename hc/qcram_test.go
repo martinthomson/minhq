@@ -26,10 +26,6 @@ func TestQcramEncoder(t *testing.T) {
 			encoder.HuffmanPreference = hc.HuffmanCodingNever
 		}
 
-		if tc.qcramHeader == "0888c4c0c2bfbe" {
-			fmt.Println("testing")
-		}
-
 		var controlBuf bytes.Buffer
 		var headerBuf bytes.Buffer
 		err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, tc.headers...)
@@ -66,9 +62,6 @@ func TestQcramDecoderOrdered(t *testing.T) {
 	for _, tc := range testCases {
 		if tc.resetTable {
 			decoder = hc.NewQcramDecoder(256)
-		}
-		if tc.qcramHeader == "0888c4c0c2bfbe" {
-			fmt.Println("testing")
 		}
 
 		if len(tc.qcramControl) > 0 {

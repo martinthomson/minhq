@@ -4,44 +4,17 @@ import (
 	"io"
 )
 
-// dynamicEntry is an entry in the dynamic table.
-type dynamicEntry struct {
-	name  string
-	value string
-	// The insert count at the time that this was added to the table.
-	inserts int
-}
-
-func (hd dynamicEntry) Index(base int) int {
-	delta := base - hd.inserts
-	if delta < 0 {
-		// If base < inserts, then this entry was added after the base and the index
-		// will be invalid. Return 0.
-		return 0
-	}
-	// If base > inserts, then this entry was added before the base was set. The
-	// index is be valid.
-	return len(staticTable) + 1 + delta
-}
-
-func (hd dynamicEntry) Name() string {
-	return hd.name
-}
-func (hd dynamicEntry) Value() string {
-	return hd.value
-}
-
-func (hd dynamicEntry) Base() int {
-	return hd.inserts
-}
-
 // hpackEntry is an entry in the dynamic table.
 type hpackEntry struct {
-	dynamicEntry
+	BasicDynamicEntry
 }
 
 func (hd hpackEntry) Size() TableCapacity {
 	return TableCapacity(32 + len(hd.Name()) + len(hd.Value()))
+}
+
+func makeHpackEntry(name string, value string) DynamicEntry {
+	return &hpackEntry{BasicDynamicEntry{name, value, 0}}
 }
 
 // HpackDecoder is the top-level class for header decompression.
@@ -66,7 +39,7 @@ func (decoder *HpackDecoder) readIncremental(reader *Reader) (*HeaderField, erro
 	if err != nil {
 		return nil, err
 	}
-	decoder.Table.Insert(name, value)
+	decoder.Table.Insert(makeHpackEntry(name, value), nil)
 	return &HeaderField{name, value, false}, nil
 }
 
@@ -219,7 +192,7 @@ func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nam
 	if err != nil {
 		return err
 	}
-	_ = encoder.Table.Insert(h.Name, h.Value)
+	encoder.Table.Insert(makeHpackEntry(h.Name, h.Value), nil)
 	return nil
 }
 

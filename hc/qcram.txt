@@ -91,3 +91,13 @@ explained somewhere.
 # Acknowledge Dmitry
 
 Dmitry did a lot of work on the design team.
+
+# Dynamic Table Overhead
+
+The draft has a TODO about overhead for each dynamic entry. I added a field to
+every entry that allows it to know its own base, but that is a simplification
+in my code, you don't need that. The other overheads are all fixed. I don't
+think that we need to change from 32. This decision would reduce code
+complexity in my implementation because dynamic table entries now have two
+implementations just to account for this possibility.
+

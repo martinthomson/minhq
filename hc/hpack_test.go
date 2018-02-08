@@ -49,8 +49,7 @@ func TestHpackEncoder(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, encoded, buf.Bytes())
 
-		assert.Equal(t, tc.tableSize, encoder.Table.Used())
-		checkDynamicTable(t, &encoder.Table, tc.dynamicTable)
+		checkDynamicTable(t, &encoder.Table, &tc.hpackTable)
 	}
 }
 
@@ -86,8 +85,7 @@ func TestHpackDecoder(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, tc.headers, h)
 
-		assert.Equal(t, tc.tableSize, decoder.Table.Used())
-		checkDynamicTable(t, &decoder.Table, tc.dynamicTable)
+		checkDynamicTable(t, &decoder.Table, &tc.hpackTable)
 	}
 }
 
@@ -102,8 +100,11 @@ func TestHpackEviction(t *testing.T) {
 		{Name: "one", Value: "1", Sensitive: false},
 		{Name: "two", Value: "2", Sensitive: false},
 	}
-	dynamicTable := []dynamicTableEntry{
-		{"two", "2"},
+	dynamicTable := &tableState{
+		size: 36,
+		entries: []tableStateEntry{
+			{"two", "2"},
+		},
 	}
 
 	var encoder hc.HpackEncoder

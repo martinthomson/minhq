@@ -15,8 +15,7 @@ func TestQcramEncoder(t *testing.T) {
 
 	for _, tc := range testCases {
 		if tc.resetTable {
-			encoder = new(hc.QcramEncoder)
-			encoder.SetCapacity(256)
+			encoder = hc.NewQcramEncoder(256)
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
 		}
@@ -25,6 +24,10 @@ func TestQcramEncoder(t *testing.T) {
 			encoder.HuffmanPreference = hc.HuffmanCodingAlways
 		} else {
 			encoder.HuffmanPreference = hc.HuffmanCodingNever
+		}
+
+		if tc.qcramHeader == "0888c4c0c2bfbe" {
+			fmt.Println("testing")
 		}
 
 		var controlBuf bytes.Buffer
@@ -50,7 +53,42 @@ func TestQcramEncoder(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-		assert.Equal(t, tc.tableSize, encoder.Table.Used())
-		checkDynamicTable(t, &encoder.Table, tc.dynamicTable)
+		var dynamicTable = &tc.hpackTable
+		if tc.qcramTable != nil {
+			dynamicTable = tc.qcramTable
+		}
+		checkDynamicTable(t, &encoder.Table, dynamicTable)
+	}
+}
+func TestQcramDecoderOrdered(t *testing.T) {
+	var decoder *hc.QcramDecoder
+
+	for _, tc := range testCases {
+		if tc.resetTable {
+			decoder = hc.NewQcramDecoder(256)
+		}
+		if tc.qcramHeader == "0888c4c0c2bfbe" {
+			fmt.Println("testing")
+		}
+
+		if len(tc.qcramControl) > 0 {
+			control, err := hex.DecodeString(tc.qcramControl)
+			assert.Nil(t, err)
+			err = decoder.ReadTableChanges(bytes.NewReader(control))
+			assert.Nil(t, err)
+		}
+
+		var dynamicTable = &tc.hpackTable
+		if tc.qcramTable != nil {
+			dynamicTable = tc.qcramTable
+		}
+		checkDynamicTable(t, &decoder.Table, dynamicTable)
+
+		encoded, err := hex.DecodeString(tc.qcramHeader)
+		assert.Nil(t, err)
+		headers, err := decoder.ReadHeaderBlock(bytes.NewReader(encoded))
+		assert.Nil(t, err)
+
+		assert.Equal(t, tc.headers, headers)
 	}
 }

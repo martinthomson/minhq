@@ -10,12 +10,57 @@ type Entry interface {
 // DynamicEntry is an entry in the dynamic table.
 type DynamicEntry interface {
 	Entry
+	setBase(int)
 	Base() int
 	Size() TableCapacity
 }
 
+// BasicDynamicEntry is a skeleton implementation of DynamicEntry.
+type BasicDynamicEntry struct {
+	N string // name
+	V string // value
+	B int    // base
+}
+
+// Index provides the table index relative to the specified base.
+func (hd BasicDynamicEntry) Index(base int) int {
+	delta := base - hd.B
+	if delta < 0 {
+		// If base < inserts, then this entry was added after the base and the index
+		// will be invalid. Return 0.
+		return 0
+	}
+	// If base > inserts, then this entry was added before the base was set. The
+	// index is be valid.
+	return len(staticTable) + 1 + delta
+}
+
+// Name is self-explanatory.
+func (hd BasicDynamicEntry) Name() string {
+	return hd.N
+}
+
+// Value is self-explanatory.
+func (hd BasicDynamicEntry) Value() string {
+	return hd.V
+}
+
+// setBase sets the base for this entry.  This is set at the point of insertion.
+func (hd *BasicDynamicEntry) setBase(base int) {
+	hd.B = base
+}
+
+// Base is the number of inserts at the point that this entry was inserted in the table.
+func (hd BasicDynamicEntry) Base() int {
+	return hd.B
+}
+
 // TableCapacity is the type of the HPACK table capacity.
 type TableCapacity uint
+
+type evictionCheck interface {
+	CanEvict(DynamicEntry) bool
+}
 
 // Table holds dynamic entries and accounting for space.
 type Table struct {
@@ -25,17 +70,17 @@ type Table struct {
 	capacity TableCapacity
 	// The amount of used capacity.
 	used TableCapacity
-	// The total number of inserts thus far.
-	inserts int
-
-	// This is used to make new entries.
-	dynamicMaker func(string, string, int) DynamicEntry
+	// The total number of base thus far.
+	base int
 }
 
-// Len is the number of entries in the combined table. Note that because
-// HPACK uses a 1-based index, this is the index of the oldest dynamic entry.
-func (table *Table) Len() int {
-	return len(staticTable) + len(table.dynamic)
+// LastIndex returns the index of the last entry in the table. Indices greater
+// than this have been evicted.
+func (table *Table) LastIndex(base int) int {
+	if table.dynamic == nil {
+		return len(staticTable)
+	}
+	return table.dynamic[len(table.dynamic)-1].Index(base)
 }
 
 // Get an entry from the table.
@@ -59,43 +104,52 @@ func (table *Table) GetWithBase(i int, base int) Entry {
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.
-func (table *Table) evictTo(reduced TableCapacity) {
+func (table *Table) evictTo(reduced TableCapacity, evict evictionCheck) bool {
 	l := len(table.dynamic)
-	for l > 0 && table.used > reduced {
+	used := table.used
+	for l > 0 && used > reduced {
 		l--
-		table.used -= table.dynamic[l].Size()
+		if evict != nil && !evict.CanEvict(table.dynamic[l]) {
+			return false
+		}
+		used -= table.dynamic[l].Size()
 	}
 	table.dynamic = table.dynamic[0:l]
+	table.used = used
+	return true
 }
 
-func defaultDynamicMaker(name string, value string, base int) DynamicEntry {
-	return &hpackEntry{dynamicEntry{name, value, base}}
-}
+// Insert an entry into the table.  Return nil if the entry couldn't be added.
+func (table *Table) Insert(entry DynamicEntry, evict evictionCheck) bool {
+	table.base++
+	entry.setBase(table.Base())
 
-// Insert an entry into the table.
-func (table *Table) Insert(name string, value string) Entry {
-	table.inserts++
-	if table.dynamicMaker == nil {
-		table.dynamicMaker = defaultDynamicMaker
-	}
-	entry := table.dynamicMaker(name, value, table.Base())
 	if entry.Size() > table.capacity {
-		table.dynamic = table.dynamic[0:0]
-		table.used = 0
-	} else {
-		table.evictTo(table.capacity - entry.Size())
-		tmp := make([]DynamicEntry, len(table.dynamic)+1)
-		copy(tmp[1:], table.dynamic)
-		tmp[0] = entry
-		table.dynamic = tmp
-		table.used += entry.Size()
+		if table.evictTo(0, evict) {
+			table.dynamic = table.dynamic[0:0]
+			table.used = 0
+		}
+		return false
 	}
-	return entry
+
+	if !table.evictTo(table.capacity-entry.Size(), evict) {
+		return false
+	}
+
+	// TODO This is grossly inefficient. Indexing from the other end might be less
+	// bad, especially if the underlying array is made a little bigger than needed
+	// when resizing.
+	tmp := make([]DynamicEntry, len(table.dynamic)+1)
+	copy(tmp[1:], table.dynamic)
+	tmp[0] = entry
+	table.dynamic = tmp
+	table.used += entry.Size()
+	return true
 }
 
 // SetCapacity increases or reduces capacity to the set target.
 func (table *Table) SetCapacity(capacity TableCapacity) {
-	table.evictTo(capacity)
+	table.evictTo(capacity, nil)
 	table.capacity = capacity
 }
 
@@ -106,7 +160,7 @@ func (table *Table) Used() TableCapacity {
 
 // Base returns the current base for the table, which is the number of inserts.
 func (table *Table) Base() int {
-	return table.inserts
+	return table.base
 }
 
 func (table *Table) lookupStatic(name string, value string) (Entry, Entry) {

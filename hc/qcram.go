@@ -1,6 +1,7 @@
 package hc
 
 import (
+	"container/list"
 	"errors"
 	"io"
 )
@@ -11,15 +12,21 @@ var ErrTableUpdateInHeaderBlock = errors.New("header table update in header bloc
 // ErrHeaderInTableUpdate shouldn't exist, but this is an early version of QCRAM.
 var ErrHeaderInTableUpdate = errors.New("header emission in table update")
 
-// ErrBlockingTableUpdate is where a table update depends on changes that
-// haven't happened yet, which is nonsensical.
-var ErrBlockingTableUpdate = errors.New("blocking required for table update")
-
 func setCapacity(table *Table, c TableCapacity) {
 	if table.Base() > 0 {
 		panic("SetCapacity called when table isn't empty")
 	}
 	table.SetCapacity(c)
+}
+
+// qcramEntry is an entry in the QCRAM table.
+type qcramEntry struct {
+	dynamicEntry
+}
+
+func (e *qcramEntry) Size() TableCapacity {
+	// TODO increase the overhead to something more than 32.  Maybe.
+	return TableCapacity(32 + len(e.Name()) + len(e.Value()))
 }
 
 // QcramDecoder is the top-level class for header decompression.
@@ -28,9 +35,14 @@ type QcramDecoder struct {
 	inserts chan int
 }
 
+func makeQcramEntry(name string, value string, base int) DynamicEntry {
+	return &qcramEntry{dynamicEntry{name, value, base}}
+}
+
 // SetCapacity sets the capacity of the table. This can't be set once the table
 // has been used.
 func (decoder *QcramDecoder) SetCapacity(c TableCapacity) {
+	decoder.Table.dynamicMaker = makeQcramEntry
 	setCapacity(&decoder.Table, c)
 }
 
@@ -204,7 +216,7 @@ func (state *qcramWriterState) updateLargestBase(e Entry) {
 	if e == nil {
 		return
 	}
-	dyn, ok := e.(dynamicEntry)
+	dyn, ok := e.(DynamicEntry)
 	if ok && dyn.Base() > state.largestBase {
 		state.largestBase = dyn.Base()
 	}
@@ -215,9 +227,19 @@ type QcramEncoder struct {
 	encoderCommon
 }
 
+type qcramEncoderEntry struct {
+	qcramEntry
+	unacknowledged list.List
+}
+
+func makeQcramEncoderEntry(name string, value string, base int) DynamicEntry {
+	return &qcramEncoderEntry{qcramEntry{dynamicEntry{name, value, base}}, list.List{}}
+}
+
 // SetCapacity sets the capacity of the table. This can't be set once the table
 // has been used.
 func (encoder *QcramEncoder) SetCapacity(c TableCapacity) {
+	encoder.Table.dynamicMaker = makeQcramEncoderEntry
 	setCapacity(&encoder.Table, c)
 }
 

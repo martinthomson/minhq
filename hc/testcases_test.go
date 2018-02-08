@@ -335,4 +335,26 @@ var testCases = []struct {
 			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 	},
+	// Using existing values in the dynamic table revealed a bug in QCRAM.
+	{
+		resetTable: false,
+		headers: []hc.HeaderField{
+			{Name: ":status", Value: "200", Sensitive: false},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
+			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+			{Name: "set-cookie",
+				Value:     "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1",
+				Sensitive: false},
+		},
+		huffman:      true,
+		hpack:        "88c0bfbe",
+		qcramControl: "",
+		qcramHeader:  "0888c0bfbe",
+		tableSize:    215,
+		dynamicTable: []dynamicTableEntry{
+			{"set-cookie", "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1"},
+			{"content-encoding", "gzip"},
+			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+		},
+	},
 }

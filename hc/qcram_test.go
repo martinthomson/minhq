@@ -20,6 +20,7 @@ func TestQcramEncoder(t *testing.T) {
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
 		}
+
 		if tc.huffman {
 			encoder.HuffmanPreference = hc.HuffmanCodingAlways
 		} else {

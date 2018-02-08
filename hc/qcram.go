@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"errors"
 	"io"
+	"sync"
 )
 
 // TODO increase the overhead to something more than 32 to account for the need to store the base.
@@ -34,7 +35,9 @@ func (e *qcramEntry) Size() TableCapacity {
 // QcramDecoder is the top-level class for header decompression.
 type QcramDecoder struct {
 	decoderCommon
-	inserts chan int
+	// This is used to notify any waiting readers that new table entries are
+	// available.
+	insertCondition *sync.Cond
 }
 
 func makeQcramEntry(name string, value string) DynamicEntry {
@@ -44,9 +47,16 @@ func makeQcramEntry(name string, value string) DynamicEntry {
 // NewQcramDecoder makes and sets up a QcramDecoder.
 func NewQcramDecoder(c TableCapacity) *QcramDecoder {
 	decoder := new(QcramDecoder)
-	decoder.inserts = make(chan int, int(c/qcramOverhead))
+	decoder.insertCondition = sync.NewCond(new(sync.Mutex))
 	setCapacity(&decoder.Table, c)
 	return decoder
+}
+
+// Insert changes and notify any waiting readers.
+func (decoder *QcramDecoder) insert(name string, value string) {
+	entry := makeQcramEntry(name, value)
+	decoder.Table.Insert(entry, nil)
+	decoder.insertCondition.Broadcast()
 }
 
 func (decoder *QcramDecoder) readIncremental(reader *Reader, base int) error {
@@ -54,8 +64,7 @@ func (decoder *QcramDecoder) readIncremental(reader *Reader, base int) error {
 	if err != nil {
 		return err
 	}
-	decoder.Table.Insert(makeQcramEntry(name, value), nil)
-	decoder.inserts <- decoder.Table.Base()
+	decoder.insert(name, value)
 	return nil
 }
 
@@ -68,8 +77,7 @@ func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
 	if entry == nil {
 		return ErrIndexError
 	}
-	decoder.Table.Insert(makeQcramEntry(entry.Name(), entry.Value()), nil)
-	decoder.inserts <- decoder.Table.Base()
+	decoder.insert(entry.Name(), entry.Value())
 	return nil
 }
 
@@ -147,7 +155,7 @@ func (decoder *QcramDecoder) readBase(reader *Reader) (int, error) {
 	}
 
 	for decoder.Table.Base() < base {
-		<-decoder.inserts
+		decoder.insertCondition.Wait()
 	}
 	return base, nil
 }

@@ -24,8 +24,12 @@ func TestGetInvalid(t *testing.T) {
 	table.SetCapacity(100)
 	e := table.Insert("name", "value", nil)
 	assert.Equal(t, e, table.Get(e.Index(table.Base())))
-	nextIdx = table.LastIndex(table.Base()) + 1
-	assert.Nil(t, table.Get(nextIdx))
+	assert.Equal(t, 1, table.Base())
+	idx := e.Index(table.Base())
+	// asking for one more fails
+	assert.Nil(t, table.Get(idx+1))
+	// so does asking for the entry with a lower base
+	assert.Nil(t, table.GetWithBase(idx, table.Base()-1))
 }
 
 func TestInsertRetrieve(t *testing.T) {

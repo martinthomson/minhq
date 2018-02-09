@@ -1,5 +1,9 @@
 package hc
 
+import (
+	"sync"
+)
+
 // Entry is a key-value pair for the HPACK table.
 type Entry interface {
 	Name() string
@@ -72,27 +76,25 @@ type Table struct {
 	used TableCapacity
 	// The total number of base thus far.
 	base int
+
+	// For tables that need to be accessed on multiple threads.
+	Lock *sync.RWMutex
 }
 
 // LastIndex returns the index of the last entry in the table. Indices greater
 // than this have been evicted.
 func (table *Table) LastIndex(base int) int {
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
 	if table.dynamic == nil {
 		return len(staticTable)
 	}
 	return table.dynamic[len(table.dynamic)-1].Index(base)
 }
 
-// Get an entry from the table.
-func (table *Table) Get(i int) Entry {
-	return table.GetWithBase(i, table.Base())
-}
-
-// GetWithBase retrieves an entry relative to the specified base.
-func (table *Table) GetWithBase(i int, base int) Entry {
-	if i <= 0 {
-		return nil
-	}
+func (table *Table) getWithBaseImpl(i int, base int) Entry {
 	if i <= len(staticTable) {
 		return staticTable[i-1]
 	}
@@ -101,6 +103,27 @@ func (table *Table) GetWithBase(i int, base int) Entry {
 		return nil
 	}
 	return table.dynamic[dynIndex]
+}
+
+// GetWithBase retrieves an entry relative to the specified base.
+func (table *Table) GetWithBase(i int, base int) Entry {
+	if i <= 0 {
+		return nil
+	}
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
+	return table.getWithBaseImpl(i, base)
+}
+
+// Get an entry from the table.
+func (table *Table) Get(i int) Entry {
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
+	return table.getWithBaseImpl(i, table.base)
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.
@@ -121,6 +144,10 @@ func (table *Table) evictTo(reduced TableCapacity, evict evictionCheck) bool {
 
 // Insert an entry into the table.  Return nil if the entry couldn't be added.
 func (table *Table) Insert(entry DynamicEntry, evict evictionCheck) bool {
+	if table.Lock != nil {
+		defer table.Lock.Unlock()
+		table.Lock.Lock()
+	}
 	if entry.Size() > table.capacity {
 		if table.evictTo(0, evict) {
 			table.dynamic = table.dynamic[0:0]
@@ -134,7 +161,7 @@ func (table *Table) Insert(entry DynamicEntry, evict evictionCheck) bool {
 	}
 
 	table.base++
-	entry.setBase(table.Base())
+	entry.setBase(table.base)
 
 	// TODO This is grossly inefficient. Indexing from the other end might be less
 	// bad, especially if the underlying array is made a little bigger than needed
@@ -149,23 +176,33 @@ func (table *Table) Insert(entry DynamicEntry, evict evictionCheck) bool {
 
 // SetCapacity increases or reduces capacity to the set target.
 func (table *Table) SetCapacity(capacity TableCapacity) {
+	if table.Lock != nil {
+		defer table.Lock.Unlock()
+		table.Lock.Lock()
+	}
 	table.evictTo(capacity, nil)
 	table.capacity = capacity
 }
 
 // Used returns the amount of capacity that is in use.
 func (table *Table) Used() TableCapacity {
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
 	return table.used
 }
 
 // Base returns the current base for the table, which is the number of inserts.
 func (table *Table) Base() int {
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
 	return table.base
 }
 
-// LookupLimited looks in the table for a matching name and value. It only looks at the
-// first `dynamicLimit` values from the dynamic table though.
-func (table *Table) lookupLimited(name string, value string, dynamicLimit int) (Entry, Entry) {
+func (table *Table) lookupLimitedImpl(name string, value string, dynamicLimit int) (Entry, Entry) {
 	var nameMatch Entry
 	for _, entry := range staticTable {
 		if entry.Name() == name {
@@ -190,22 +227,44 @@ func (table *Table) lookupLimited(name string, value string, dynamicLimit int) (
 	return nil, nameMatch
 }
 
+// LookupLimited looks in the table for a matching name and value. It only looks at the
+// first `dynamicLimit` values from the dynamic table though.
+func (table *Table) LookupLimited(name string, value string, dynamicLimit int) (Entry, Entry) {
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
+	return table.lookupLimitedImpl(name, value, dynamicLimit)
+}
+
 // Lookup looks in the table for a matching name and value. This produces two
 // return values: the first is match on both name and value, which is often nil.
 // The second is a match on name only, which might also be nil.
 func (table *Table) Lookup(name string, value string) (Entry, Entry) {
-	return table.lookupLimited(name, value, len(table.dynamic))
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
+	return table.lookupLimitedImpl(name, value, len(table.dynamic))
 }
 
 // LookupDynamic looks in the table for a dynamic entry after the provided
 // offset. It is design for use after lookupLimited() fails.
-func (table *Table) lookupDynamic(name string, value string, offset int) DynamicEntry {
+func (table *Table) LookupDynamic(name string, value string, offset int) (DynamicEntry, DynamicEntry) {
+	if table.Lock != nil {
+		defer table.Lock.RUnlock()
+		table.Lock.RLock()
+	}
+	var nameMatch DynamicEntry
 	for _, entry := range table.dynamic[offset:] {
 		if entry.Name() == name {
 			if entry.Value() == value {
-				return entry
+				return entry, entry
+			}
+			if nameMatch != nil {
+				nameMatch = entry
 			}
 		}
 	}
-	return nil
+	return nil, nameMatch
 }

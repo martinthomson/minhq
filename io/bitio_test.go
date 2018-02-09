@@ -1,17 +1,17 @@
-package bitio_test
+package io_test
 
 import (
 	"bytes"
 	"io"
 	"testing"
 
-	"github.com/martinthomson/minhq/bitio"
+	minhqio "github.com/martinthomson/minhq/io"
 	"github.com/stvp/assert"
 )
 
 func TestWriter(t *testing.T) {
 	var buf bytes.Buffer
-	writer := bitio.NewBitWriter(&buf)
+	writer := minhqio.NewBitWriter(&buf)
 	assert.Nil(t, writer.WriteBit(0))
 	assert.Equal(t, 0, len(buf.Bytes()))
 	assert.Nil(t, writer.WriteBit(1))
@@ -60,14 +60,14 @@ func (bbw *blockingByteWriter) Write(p []byte) (int, error) {
 // as an error.
 func TestBlockingWrite(t *testing.T) {
 	var buf bytes.Buffer
-	writer := bitio.NewBitWriter(&blockingByteWriter{&buf, 1})
+	writer := minhqio.NewBitWriter(&blockingByteWriter{&buf, 1})
 	assert.Nil(t, writer.WriteBit(1)) // buffered
 	assert.NotNil(t, writer.WriteBits(1, 7))
 	assert.Nil(t, writer.WriteBits(1, 7))
 	assert.Equal(t, []byte{0x81}, buf.Bytes())
 
 	buf.Truncate(0)
-	writer = bitio.NewBitWriter(&blockingByteWriter{&buf, 2})
+	writer = minhqio.NewBitWriter(&blockingByteWriter{&buf, 2})
 	assert.Nil(t, writer.WriteBits(0xffff, 16))
 	assert.Equal(t, []byte{0xff}, buf.Bytes())
 	assert.Nil(t, writer.WriteBits(0x5555, 16))
@@ -76,7 +76,7 @@ func TestBlockingWrite(t *testing.T) {
 
 func TestWriteError(t *testing.T) {
 	var buf bytes.Buffer
-	writer := bitio.NewBitWriter(&buf)
+	writer := minhqio.NewBitWriter(&buf)
 	assert.NotNil(t, writer.WriteBits(1, 65))
 	assert.NotNil(t, writer.WriteBits(2, 1))
 }
@@ -84,7 +84,7 @@ func TestWriteError(t *testing.T) {
 func TestReader(t *testing.T) {
 	buf := bytes.NewReader([]byte{0x40, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 		0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xe0})
-	reader := bitio.NewBitReader(buf)
+	reader := minhqio.NewBitReader(buf)
 	b, err := reader.ReadBit()
 	assert.Nil(t, err)
 	assert.Equal(t, uint8(0), b)

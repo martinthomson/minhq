@@ -83,10 +83,10 @@ lookups anyway, so you can save the based from that pass.
 
 # Tracking ACKs is Harder Than It Seems
 
-There are multiple header blocks per stream, and ACKs only hit the first. You
-can't just store a stream reference (or Request-ID) against each header block,
-you have to store a tuple of stream and header block index. This needs to be
-explained somewhere.
+There are multiple header blocks per stream, and ACKs only identify the stream.
+You can't just store a stream reference (or Request-ID) against each header
+block, you have to store a tuple of stream and header block index. This needs
+to be explained somewhere.
 
 # Acknowledge Dmitry
 

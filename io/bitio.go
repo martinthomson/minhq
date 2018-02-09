@@ -1,4 +1,4 @@
-package bitio
+package io
 
 import (
 	"bytes"
@@ -141,8 +141,8 @@ func (br *BitReader) readByteInternal() (byte, error) {
 	if ok {
 		return byteReader.ReadByte()
 	}
-	buf := make([]byte, 1)
-	n, err := br.reader.Read(buf)
+	buf := [1]byte{}
+	n, err := br.reader.Read(buf[:])
 	if err != nil {
 		return 0, err
 	}

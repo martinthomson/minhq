@@ -28,7 +28,7 @@ func checkDynamicTable(t *testing.T, table *hc.Table, ts *tableState) {
 	}
 }
 
-var testCases = []struct {
+type testCase struct {
 	resetTable   bool
 	headers      []hc.HeaderField
 	huffman      bool
@@ -37,11 +37,13 @@ var testCases = []struct {
 	qcramControl string
 	qcramHeader  string
 	qcramTable   *tableState
-}{
+}
+
+var testCases = []testCase{
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: "custom-key", Value: "custom-header", Sensitive: false},
+			{Name: "custom-key", Value: "custom-header"},
 		},
 		huffman: false,
 		hpack:   "400a637573746f6d2d6b65790d637573746f6d2d686561646572",
@@ -57,7 +59,7 @@ var testCases = []struct {
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: ":path", Value: "/sample/path", Sensitive: false},
+			{Name: ":path", Value: "/sample/path"},
 		},
 		huffman: false,
 		hpack:   "040c2f73616d706c652f70617468",
@@ -83,7 +85,7 @@ var testCases = []struct {
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: ":method", Value: "GET", Sensitive: false},
+			{Name: ":method", Value: "GET"},
 		},
 		huffman: false,
 		hpack:   "82",
@@ -96,10 +98,10 @@ var testCases = []struct {
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: ":method", Value: "GET", Sensitive: false},
-			{Name: ":scheme", Value: "http", Sensitive: false},
-			{Name: ":path", Value: "/", Sensitive: false},
-			{Name: ":authority", Value: "www.example.com", Sensitive: false},
+			{Name: ":method", Value: "GET"},
+			{Name: ":scheme", Value: "http"},
+			{Name: ":path", Value: "/"},
+			{Name: ":authority", Value: "www.example.com"},
 		},
 		huffman: false,
 		hpack:   "828684410f7777772e6578616d706c652e636f6d",
@@ -115,11 +117,11 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":method", Value: "GET", Sensitive: false},
-			{Name: ":scheme", Value: "http", Sensitive: false},
-			{Name: ":path", Value: "/", Sensitive: false},
-			{Name: ":authority", Value: "www.example.com", Sensitive: false},
-			{Name: "cache-control", Value: "no-cache", Sensitive: false},
+			{Name: ":method", Value: "GET"},
+			{Name: ":scheme", Value: "http"},
+			{Name: ":path", Value: "/"},
+			{Name: ":authority", Value: "www.example.com"},
+			{Name: "cache-control", Value: "no-cache"},
 		},
 		huffman: false,
 		hpack:   "828684be58086e6f2d6361636865",
@@ -136,11 +138,11 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":method", Value: "GET", Sensitive: false},
-			{Name: ":scheme", Value: "https", Sensitive: false},
-			{Name: ":path", Value: "/index.html", Sensitive: false},
-			{Name: ":authority", Value: "www.example.com", Sensitive: false},
-			{Name: "custom-key", Value: "custom-value", Sensitive: false},
+			{Name: ":method", Value: "GET"},
+			{Name: ":scheme", Value: "https"},
+			{Name: ":path", Value: "/index.html"},
+			{Name: ":authority", Value: "www.example.com"},
+			{Name: "custom-key", Value: "custom-value"},
 		},
 		huffman: false,
 		hpack:   "828785bf400a637573746f6d2d6b65790c637573746f6d2d76616c7565",
@@ -158,10 +160,10 @@ var testCases = []struct {
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: ":method", Value: "GET", Sensitive: false},
-			{Name: ":scheme", Value: "http", Sensitive: false},
-			{Name: ":path", Value: "/", Sensitive: false},
-			{Name: ":authority", Value: "www.example.com", Sensitive: false},
+			{Name: ":method", Value: "GET"},
+			{Name: ":scheme", Value: "http"},
+			{Name: ":path", Value: "/"},
+			{Name: ":authority", Value: "www.example.com"},
 		},
 		huffman: true,
 		hpack:   "828684418cf1e3c2e5f23a6ba0ab90f4ff",
@@ -177,11 +179,11 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":method", Value: "GET", Sensitive: false},
-			{Name: ":scheme", Value: "http", Sensitive: false},
-			{Name: ":path", Value: "/", Sensitive: false},
-			{Name: ":authority", Value: "www.example.com", Sensitive: false},
-			{Name: "cache-control", Value: "no-cache", Sensitive: false},
+			{Name: ":method", Value: "GET"},
+			{Name: ":scheme", Value: "http"},
+			{Name: ":path", Value: "/"},
+			{Name: ":authority", Value: "www.example.com"},
+			{Name: "cache-control", Value: "no-cache"},
 		},
 		huffman: true,
 		hpack:   "828684be5886a8eb10649cbf",
@@ -198,11 +200,11 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":method", Value: "GET", Sensitive: false},
-			{Name: ":scheme", Value: "https", Sensitive: false},
-			{Name: ":path", Value: "/index.html", Sensitive: false},
-			{Name: ":authority", Value: "www.example.com", Sensitive: false},
-			{Name: "custom-key", Value: "custom-value", Sensitive: false},
+			{Name: ":method", Value: "GET"},
+			{Name: ":scheme", Value: "https"},
+			{Name: ":path", Value: "/index.html"},
+			{Name: ":authority", Value: "www.example.com"},
+			{Name: "custom-key", Value: "custom-value"},
 		},
 		huffman: true,
 		hpack:   "828785bf408825a849e95ba97d7f8925a849e95bb8e8b4bf",
@@ -220,10 +222,10 @@ var testCases = []struct {
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "302", Sensitive: false},
-			{Name: "cache-control", Value: "private", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
-			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+			{Name: ":status", Value: "302"},
+			{Name: "cache-control", Value: "private"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{Name: "location", Value: "https://www.example.com"},
 		},
 		huffman: false,
 		hpack: "4803333032580770726976617465611d4d6f6e2c203231204f63742032303133" +
@@ -246,10 +248,10 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "307", Sensitive: false},
-			{Name: "cache-control", Value: "private", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
-			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+			{Name: ":status", Value: "307"},
+			{Name: "cache-control", Value: "private"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{Name: "location", Value: "https://www.example.com"},
 		},
 		huffman: false,
 		hpack:   "4803333037c1c0bf",
@@ -268,11 +270,11 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "200", Sensitive: false},
-			{Name: "cache-control", Value: "private", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
-			{Name: "location", Value: "https://www.example.com", Sensitive: false},
-			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+			{Name: ":status", Value: "200"},
+			{Name: "cache-control", Value: "private"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT"},
+			{Name: "location", Value: "https://www.example.com"},
+			{Name: "content-encoding", Value: "gzip"},
 			{Name: "set-cookie",
 				Value:     "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1",
 				Sensitive: false},
@@ -295,6 +297,7 @@ var testCases = []struct {
 			"54be0f0b04677a69700f2838666f6f3d4153444a4b48514b425a584f5157454f5049" +
 			"5541585157454f49553b206d61782d6167653d333630303b2076657273696f6e" +
 			"3d31",
+		// 0488c00004646174651d4d6f6e2c203231204f637420323031332032303a31333a323220474d54be0010636f6e74656e742d656e636f64696e6704677a6970000a7365742d636f6f6b696538666f6f3d4153444a4b48514b425a584f5157454f50495541585157454f49553b206d61782d6167653d333630303b2076657273696f6e3d31
 		qcramTable: &tableState{
 			size: 222,
 			entries: []tableStateEntry{
@@ -308,10 +311,10 @@ var testCases = []struct {
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "302", Sensitive: false},
-			{Name: "cache-control", Value: "private", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
-			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+			{Name: ":status", Value: "302"},
+			{Name: "cache-control", Value: "private"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{Name: "location", Value: "https://www.example.com"},
 		},
 		huffman: true,
 		hpack: "488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a6" +
@@ -332,10 +335,10 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "307", Sensitive: false},
-			{Name: "cache-control", Value: "private", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
-			{Name: "location", Value: "https://www.example.com", Sensitive: false},
+			{Name: ":status", Value: "307"},
+			{Name: "cache-control", Value: "private"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
+			{Name: "location", Value: "https://www.example.com"},
 		},
 		huffman: true,
 		hpack:   "4883640effc1c0bf",
@@ -354,11 +357,11 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "200", Sensitive: false},
-			{Name: "cache-control", Value: "private", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
-			{Name: "location", Value: "https://www.example.com", Sensitive: false},
-			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+			{Name: ":status", Value: "200"},
+			{Name: "cache-control", Value: "private"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT"},
+			{Name: "location", Value: "https://www.example.com"},
+			{Name: "content-encoding", Value: "gzip"},
 			{Name: "set-cookie",
 				Value:     "foo=ASDJKHQKBZXOQWEOPIUAXQWEOIU; max-age=3600; version=1",
 				Sensitive: false},
@@ -393,9 +396,9 @@ var testCases = []struct {
 	{
 		resetTable: true,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "200", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
-			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+			{Name: ":status", Value: "200"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT"},
+			{Name: "content-encoding", Value: "gzip"},
 		},
 		huffman: true,
 		hpack:   "886196d07abe941054d444a8200595040b8166e084a62d1bff5a839bd9ab",
@@ -412,9 +415,9 @@ var testCases = []struct {
 	{
 		resetTable: false,
 		headers: []hc.HeaderField{
-			{Name: ":status", Value: "200", Sensitive: false},
-			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT", Sensitive: false},
-			{Name: "content-encoding", Value: "gzip", Sensitive: false},
+			{Name: ":status", Value: "200"},
+			{Name: "date", Value: "Mon, 21 Oct 2013 20:13:22 GMT"},
+			{Name: "content-encoding", Value: "gzip"},
 		},
 		huffman: true,
 		hpack:   "88bfbe",

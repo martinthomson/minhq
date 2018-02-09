@@ -3,6 +3,7 @@ package hc
 import (
 	"container/list"
 	"errors"
+	"fmt"
 	"io"
 	"sync"
 )
@@ -57,8 +58,10 @@ func NewQcramDecoder(c TableCapacity) *QcramDecoder {
 
 // Insert changes and notify any waiting readers.
 func (decoder *QcramDecoder) insert(name string, value string) {
+	fmt.Println("insert", name, value)
 	entry := makeQcramEntry(name, value)
 	decoder.Table.Insert(entry, nil)
+	fmt.Println("broadcast", decoder.Table.Base())
 	decoder.insertCondition.Broadcast()
 }
 
@@ -158,9 +161,27 @@ func (decoder *QcramDecoder) readBase(reader *Reader) (int, error) {
 	}
 
 	for decoder.Table.Base() < base {
+		decoder.insertCondition.L.Lock()
 		decoder.insertCondition.Wait()
+		decoder.insertCondition.L.Unlock()
 	}
+	fmt.Println("got base", base)
 	return base, nil
+}
+
+// Sanity-check header ordering.
+func validatePseudoHeaders(headers []HeaderField) error {
+	pseudo := true
+	for _, h := range headers {
+		if h.Name[0] == ':' {
+			if !pseudo {
+				return ErrPseudoHeaderOrdering
+			}
+		} else {
+			pseudo = false
+		}
+	}
+	return nil
 }
 
 // ReadHeaderBlock decodes header fields as they arrive.
@@ -197,16 +218,9 @@ func (decoder *QcramDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 		headers = append(headers, *h)
 	}
 
-	// Sanity-check header ordering.
-	pseudo := true
-	for _, h := range headers {
-		if h.Name[0] == ':' {
-			if !pseudo {
-				return nil, ErrPseudoHeaderOrdering
-			}
-		} else {
-			pseudo = false
-		}
+	err = validatePseudoHeaders(headers)
+	if err != nil {
+		return nil, err
 	}
 	return headers, nil
 }
@@ -341,7 +355,9 @@ type QcramEncoder struct {
 // NewQcramEncoder creates a new QcramEncoder and sets it up.
 // `capacity` is the capacity of the table. `margin` is the amount of capacity
 // that the encoder will actively use. Dynamic table entries inside of `margin`
-// will be referenced, those outside will not be.
+// will be referenced, those outside will not be. Set `margin` to a value that
+// is less than capacity. Setting `margin` too low can cause churn, where the
+// encoder will duplicate entries rather than reference them.
 func NewQcramEncoder(capacity TableCapacity, margin TableCapacity) *QcramEncoder {
 	encoder := new(QcramEncoder)
 	setCapacity(&encoder.Table, capacity)
@@ -374,7 +390,9 @@ func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, 
 }
 
 // writeInsert writes the entry at state.xxx[i] to the control stream.
-func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState, i int, base int) error {
+// Note that nameMatch is only used for this insertion.
+func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState, i int,
+	nameMatch Entry, base int) error {
 	h := state.headers[i]
 	entry := makeQcramEncoderEntry(h.Name, h.Value)
 	inserted := encoder.Table.Insert(entry, state)
@@ -388,7 +406,7 @@ func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState
 	if err != nil {
 		return err
 	}
-	err = encoder.writeNameValue(writer, h, state.nameMatches[i], 6, base)
+	err = encoder.writeNameValue(writer, h, nameMatch, 6, base)
 	if err != nil {
 		return err
 	}
@@ -411,30 +429,38 @@ func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *q
 		if h.Sensitive {
 			continue
 		}
-		m, nm := encoder.Table.lookupLimited(h.Name, h.Value, encoder.referenceable.count)
-		if m != nil {
-			state.matches[i] = m
-			state.updateBase(m, true)
+		match, nameMatch := encoder.Table.LookupLimited(h.Name, h.Value, encoder.referenceable.count)
+		if match != nil {
+			state.matches[i] = match
+			state.updateBase(match, true)
 			continue
 		}
 
-		md := encoder.Table.lookupDynamic(h.Name, h.Value, encoder.referenceable.count)
-		if md != nil {
-			err := encoder.writeDuplicate(w, md, state, i, base)
+		// Now look for a duplicate, and maybe a name match that we can use for
+		// insertion if duplication isn't possible. Don't use either of these when
+		// encoding the header block to avoid holding down references to entries that
+		// we might want to evict.
+		var insertNameMatch Entry
+		duplicate, insertNameMatch := encoder.Table.LookupDynamic(h.Name, h.Value, encoder.referenceable.count)
+		if duplicate != nil {
+			err := encoder.writeDuplicate(w, duplicate, state, i, base)
 			if err != nil {
 				return err
 			}
 			continue
 		}
 
-		state.nameMatches[i] = nm
+		if nameMatch != nil {
+			insertNameMatch = nameMatch
+			state.nameMatches[i] = nameMatch
+		}
 		if encoder.shouldIndex(h) {
-			err := encoder.writeInsert(w, state, i, base)
+			err := encoder.writeInsert(w, state, i, insertNameMatch, base)
 			if err != nil {
 				return err
 			}
 		} else {
-			state.updateBase(nm, false)
+			state.updateBase(nameMatch, false)
 		}
 	}
 	return nil
@@ -460,6 +486,7 @@ func (encoder QcramEncoder) writeLiteral(writer *Writer, state *qcramWriterState
 		return err
 	}
 
+	state.addUse(i)
 	return encoder.writeNameValue(writer, h, state.nameMatches[i], 4, state.largestBase)
 }
 
@@ -479,20 +506,6 @@ func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcr
 		}
 		if err != nil {
 			return err
-		}
-	}
-	return nil
-}
-
-func validatePseudoHeaders(headers []HeaderField) error {
-	pseudo := true
-	for _, h := range headers {
-		if h.Name[0] == ':' {
-			if !pseudo {
-				return ErrPseudoHeaderOrdering
-			}
-		} else {
-			pseudo = false
 		}
 	}
 	return nil
@@ -535,10 +548,10 @@ func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWri
 	return encoder.writeHeaderBlock(headerWriter, &state)
 }
 
-// Acknowledged is called when a header block has been acknowledged by the peer.
+// Acknowledge is called when a header block has been acknowledged by the peer.
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
-func (encoder *QcramEncoder) Acknowledged(token interface{}) {
+func (encoder *QcramEncoder) Acknowledge(token interface{}) {
 	for _, e := range encoder.Table.dynamic {
 		qe := e.(*qcramEncoderEntry)
 		qe.removeUse(token)

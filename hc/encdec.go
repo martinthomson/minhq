@@ -17,6 +17,10 @@ type HeaderField struct {
 	Sensitive bool
 }
 
+func (hf HeaderField) String() string {
+	return hf.Name + ": " + hf.Value
+}
+
 type decoderCommon struct {
 	// Table is public to provide access to its methods.
 	Table Table

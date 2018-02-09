@@ -21,6 +21,21 @@ func (hf HeaderField) String() string {
 	return hf.Name + ": " + hf.Value
 }
 
+// Sanity-check header ordering.
+func validatePseudoHeaders(headers []HeaderField) error {
+	pseudo := true
+	for _, h := range headers {
+		if h.Name[0] == ':' {
+			if !pseudo {
+				return ErrPseudoHeaderOrdering
+			}
+		} else {
+			pseudo = false
+		}
+	}
+	return nil
+}
+
 type decoderCommon struct {
 	// Table is public to provide access to its methods.
 	Table Table

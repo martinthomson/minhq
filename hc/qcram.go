@@ -29,7 +29,7 @@ func NewQcramDecoder(capacity TableCapacity) *QcramDecoder {
 }
 
 func (decoder *QcramDecoder) readIncremental(reader *Reader, base int) error {
-	name, value, err := decoder.readNameValue(reader, 6, base)
+	name, value, err := decoder.readNameValue(reader, 6, decoder.Table.Base())
 	if err != nil {
 		return err
 	}
@@ -42,7 +42,7 @@ func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
 	if err != nil {
 		return err
 	}
-	entry := decoder.Table.GetWithBase(index, base)
+	entry := decoder.Table.Get(index)
 	if entry == nil {
 		return ErrIndexError
 	}
@@ -125,21 +125,6 @@ func (decoder *QcramDecoder) readBase(reader *Reader) (int, error) {
 
 	decoder.table.WaitForBase(base)
 	return base, nil
-}
-
-// Sanity-check header ordering.
-func validatePseudoHeaders(headers []HeaderField) error {
-	pseudo := true
-	for _, h := range headers {
-		if h.Name[0] == ':' {
-			if !pseudo {
-				return ErrPseudoHeaderOrdering
-			}
-		} else {
-			pseudo = false
-		}
-	}
-	return nil
 }
 
 // ReadHeaderBlock decodes header fields as they arrive.
@@ -262,7 +247,8 @@ func NewQcramEncoder(capacity TableCapacity, margin TableCapacity) *QcramEncoder
 }
 
 // writeDuplicate duplicates the indicated entry.
-func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, state *qcramWriterState, i int, base int) error {
+func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, state *qcramWriterState, i int) error {
+	base := encoder.Table.Base()
 	inserted := encoder.Table.Insert(entry.Name(), entry.Value(), state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
@@ -286,8 +272,9 @@ func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, 
 // writeInsert writes the entry at state.xxx[i] to the control stream.
 // Note that nameMatch is only used for this insertion.
 func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState, i int,
-	nameMatch Entry, base int) error {
+	nameMatch Entry) error {
 	h := state.headers[i]
+	base := encoder.Table.Base()
 	inserted := encoder.Table.Insert(h.Name, h.Value, state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
@@ -313,8 +300,6 @@ func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState
 func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *qcramWriterState) error {
 	w := NewWriter(controlWriter)
 
-	base := encoder.Table.Base()
-
 	for i := range state.headers {
 		// Make sure to write into the slice rather than use a copy of each header.
 		h := state.headers[i]
@@ -335,7 +320,7 @@ func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *q
 		var insertNameMatch Entry
 		duplicate, insertNameMatch := encoder.table.LookupExtra(h.Name, h.Value)
 		if duplicate != nil {
-			err := encoder.writeDuplicate(w, duplicate, state, i, base)
+			err := encoder.writeDuplicate(w, duplicate, state, i)
 			if err != nil {
 				return err
 			}
@@ -347,7 +332,7 @@ func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *q
 			state.nameMatches[i] = nameMatch
 		}
 		if encoder.shouldIndex(h) {
-			err := encoder.writeInsert(w, state, i, insertNameMatch, base)
+			err := encoder.writeInsert(w, state, i, insertNameMatch)
 			if err != nil {
 				return err
 			}

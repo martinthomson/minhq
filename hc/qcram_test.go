@@ -117,8 +117,8 @@ func TestQcramDuplicate(t *testing.T) {
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
 
-	// This should include a duplication (that's the 3f20 on the end).
-	expectedControl, err := hex.DecodeString("4084a874941f85ee3a2d283f3f20")
+	// This should include a duplication (that's the 3f21 on the end).
+	expectedControl, err := hex.DecodeString("4084a874941f85ee3a2d283f3f21")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedControl, controlBuf.Bytes())
 
@@ -389,6 +389,32 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 			qcramControl: "5885aec3771a4b" + "6196d07abe941054d444a8200595040b8166e082a62d1bff" +
 				"6e919d29ad171863c78f0b97c8e9ae82ae43d3" + "4883640eff",
 			qcramHeader: "04bec1c0bf",
+		},
+	})
+}
+
+func TestAsyncHeaderDuplicate(t *testing.T) {
+	testQcramDecoderAsync(t, true, []testCase{
+		{
+			resetTable: true,
+			headers: []hc.HeaderField{
+				{Name: ":status", Value: "200"},
+				{Name: "cache-control", Value: "private"},
+				{Name: "location", Value: "https://www.example.com"},
+			},
+			qcramControl: "",
+			qcramHeader:  "0288bfbe",
+		},
+		{
+			resetTable: false,
+			headers: []hc.HeaderField{
+				{Name: ":status", Value: "307"},
+				{Name: "cache-control", Value: "private"},
+				{Name: "location", Value: "https://www.example.com"},
+			},
+			qcramControl: "5885aec3771a4b" + "6e919d29ad171863c78f0b97c8e9ae82ae43d3" +
+				"3f20" + "4883640eff",
+			qcramHeader: "04bebfc0",
 		},
 	})
 }

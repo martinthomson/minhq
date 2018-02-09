@@ -103,7 +103,11 @@ func (table *tableCommon) GetWithBase(i int, base int) Entry {
 	if i <= len(staticTable) {
 		return staticTable[i-1]
 	}
-	dynIndex := i - len(staticTable) - 1 + table.Base() - base
+	delta := table.Base() - base
+	if delta < 0 {
+		return nil
+	}
+	dynIndex := i - len(staticTable) - 1 + delta
 	if dynIndex >= len(table.dynamic) {
 		return nil
 	}

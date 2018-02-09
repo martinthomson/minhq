@@ -107,7 +107,7 @@ func NewWriter(writer io.Writer) *Writer {
 // WriteInt writes an integer of the specific prefix length.
 func (hw *Writer) WriteInt(p uint64, prefix byte) error {
 	if prefix > 8 || prefix == 0 {
-		return errors.New("invalid HPACK integer prefix")
+		panic("invalid HPACK integer prefix")
 	}
 	ones := (uint64(1) << prefix) - 1
 	if p < ones {

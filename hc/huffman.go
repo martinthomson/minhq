@@ -4,7 +4,7 @@ import (
 	"errors"
 	"io"
 
-	bitio "github.com/martinthomson/minhq/io"
+	"github.com/martinthomson/minhq/bitio"
 )
 
 // HuffmanCompressor is a progressive compressor for Huffman-encoded data.

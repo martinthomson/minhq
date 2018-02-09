@@ -3,7 +3,6 @@ package hc_test
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"sync"
 	"testing"
@@ -27,10 +26,6 @@ func TestQcramEncoder(t *testing.T) {
 			encoder.Acknowledge(token)
 		}
 
-		if tc.hpackTable.size == 215 {
-			fmt.Println("testing")
-		}
-
 		if tc.huffman {
 			encoder.HuffmanPreference = hc.HuffmanCodingAlways
 		} else {
@@ -41,9 +36,6 @@ func TestQcramEncoder(t *testing.T) {
 		var headerBuf bytes.Buffer
 		err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, tc.headers...)
 		assert.Nil(t, err)
-
-		fmt.Println("control", hex.EncodeToString(controlBuf.Bytes()))
-		fmt.Println("header ", hex.EncodeToString(headerBuf.Bytes()))
 
 		expectedControl, err := hex.DecodeString(tc.qcramControl)
 		assert.Nil(t, err)
@@ -106,7 +98,6 @@ func assertQcramTableFull(t *testing.T, encoder *hc.QcramEncoder) {
 	assert.Nil(t, err)
 	assert.Equal(t, 0, controlBuf.Len())
 
-	fmt.Println("full", hex.EncodeToString(headerBuf.Bytes()))
 	expectedHeader, err := hex.DecodeString("000084a874965f85ee3a2d2cbf")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
@@ -194,9 +185,6 @@ func TestQcramNameReference(t *testing.T) {
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
 
-	fmt.Println("control", hex.EncodeToString(controlBuf.Bytes()))
-	fmt.Println("header", hex.EncodeToString(headerBuf.Bytes()))
-
 	// 7f00 is an insert with a name reference.
 	expectedControl, err := hex.DecodeString("7f0085ee3a2d2bff")
 	assert.Nil(t, err)
@@ -229,9 +217,6 @@ func TestNotIndexedNameReference(t *testing.T) {
 	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
-
-	fmt.Println("control", hex.EncodeToString(controlBuf.Bytes()))
-	fmt.Println("header", hex.EncodeToString(headerBuf.Bytes()))
 
 	assert.Equal(t, 0, controlBuf.Len())
 
@@ -311,7 +296,10 @@ func (nr *notifyingReader) Wait() {
 // This test runs table updates and header blocks in parallel.
 // Table updates are delayed until the reader starts trying to process the
 // corresponding header block.
-func testQcramDecoderAsync(t *testing.T, testData []testCase) {
+// batchRead can be set to wait for all reads at once. This only works if the
+// encoder has *not* received acknowledgments for header blocks as it produces
+// the encoded data.
+func testQcramDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 	var decoder *hc.QcramDecoder
 	var controlWriter io.WriteCloser
 	var controlReader io.Reader
@@ -321,7 +309,9 @@ func testQcramDecoderAsync(t *testing.T, testData []testCase) {
 	fin := func() {
 		controlWriter.Close()
 		<-controlDone
-		headerDone.Wait()
+		if batchRead {
+			headerDone.Wait()
+		}
 	}
 
 	for _, tc := range testData {
@@ -338,20 +328,18 @@ func testQcramDecoderAsync(t *testing.T, testData []testCase) {
 			}()
 		}
 
-		fmt.Println("+1")
 		headerDone.Add(1)
 		headerBytes, err := hex.DecodeString(tc.qcramHeader)
 		assert.Nil(t, err)
 		nr := NewNotifyingReader(headerBytes)
 
-		go func(tc testCase) {
-			headers, err := decoder.ReadHeaderBlock(nr)
+		go func(tc testCase, r io.Reader) {
+			defer headerDone.Done()
+			headers, err := decoder.ReadHeaderBlock(r)
 			assert.Nil(t, err)
 
 			assert.Equal(t, tc.headers, headers)
-			fmt.Println("-1", tc.headers[0])
-			headerDone.Done()
-		}(tc)
+		}(tc, nr)
 
 		// After setting up the header block to decode, feed the control stream to the
 		// reader.  First, wait for the header block reader to take a byte.
@@ -363,6 +351,9 @@ func testQcramDecoderAsync(t *testing.T, testData []testCase) {
 			assert.Nil(t, err)
 			assert.Equal(t, len(controlBytes), n)
 		}
+		if !batchRead {
+			headerDone.Wait()
+		}
 	}
 	fin()
 }
@@ -370,36 +361,34 @@ func testQcramDecoderAsync(t *testing.T, testData []testCase) {
 // This uses the default arrangement, so that table updates appear immediately
 // after the header block that needs them.
 func TestQcramDecoderThreaded(t *testing.T) {
-	testQcramDecoderAsync(t, testCases)
+	testQcramDecoderAsync(t, false, testCases)
 }
 
 // This delays the arrival of table updates by an additional cycle.
 func TestAsyncHeaderUpdate(t *testing.T) {
-	testQcramDecoderAsync(t, []testCase{
+	testQcramDecoderAsync(t, true, []testCase{
 		{
 			resetTable: true,
 			headers: []hc.HeaderField{
-				{Name: ":status", Value: "302", Sensitive: false},
-				{Name: "cache-control", Value: "private", Sensitive: false},
-				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
-				{Name: "location", Value: "https://www.example.com", Sensitive: false},
+				{Name: ":status", Value: "200"},
+				{Name: "cache-control", Value: "private"},
+				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{Name: "location", Value: "https://www.example.com"},
 			},
-			huffman:      true,
 			qcramControl: "",
-			qcramHeader:  "04c1c0bfbe",
+			qcramHeader:  "0388c0bfbe",
 		},
 		{
 			resetTable: false,
 			headers: []hc.HeaderField{
-				{Name: ":status", Value: "307", Sensitive: false},
-				{Name: "cache-control", Value: "private", Sensitive: false},
-				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT", Sensitive: false},
-				{Name: "location", Value: "https://www.example.com", Sensitive: false},
+				{Name: ":status", Value: "307"},
+				{Name: "cache-control", Value: "private"},
+				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{Name: "location", Value: "https://www.example.com"},
 			},
-			huffman: true,
-			qcramControl: "488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a6" +
-				"2d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d34883640eff",
-			qcramHeader: "05bec1c0bf",
+			qcramControl: "5885aec3771a4b" + "6196d07abe941054d444a8200595040b8166e082a62d1bff" +
+				"6e919d29ad171863c78f0b97c8e9ae82ae43d3" + "4883640eff",
+			qcramHeader: "04bec1c0bf",
 		},
 	})
 }

@@ -7,19 +7,6 @@ import (
 	"github.com/stvp/assert"
 )
 
-type testEntry struct {
-	hc.BasicDynamicEntry
-}
-
-func entry(name string, value string) hc.DynamicEntry {
-	return &testEntry{hc.BasicDynamicEntry{N: name, V: value}}
-}
-
-// Use a fixed size to keep things simple.
-func (e testEntry) Size() hc.TableCapacity {
-	return 32
-}
-
 func TestInsertOverflow(t *testing.T) {
 	var table hc.HpackTable
 	table.SetCapacity(10)
@@ -36,7 +23,8 @@ func TestGetInvalid(t *testing.T) {
 
 	table.SetCapacity(100)
 	e := table.Insert("name", "value", nil)
-	nextIdx = e.Index(table.Base()) + 1
+	assert.Equal(t, e, table.Get(e.Index(table.Base())))
+	nextIdx = table.LastIndex(table.Base()) + 1
 	assert.Nil(t, table.Get(nextIdx))
 }
 
@@ -90,7 +78,7 @@ func TestBase(t *testing.T) {
 
 func TestInsertEvict(t *testing.T) {
 	var table hc.HpackTable
-	table.SetCapacity(64) // Enough room for two values exactly.
+	table.SetCapacity(86) // Enough room for two values.
 	assert.NotNil(t, table.Insert("name1", "value1", nil))
 	second := table.Insert("name2", "value2", nil)
 	third := table.Insert("name3", "value3", nil)

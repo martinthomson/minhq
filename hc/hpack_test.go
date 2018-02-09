@@ -3,7 +3,6 @@ package hc_test
 import (
 	"bytes"
 	"encoding/hex"
-	"fmt"
 	"testing"
 
 	"github.com/martinthomson/minhq/hc"
@@ -42,8 +41,6 @@ func TestHpackEncoder(t *testing.T) {
 		var buf bytes.Buffer
 		err := encoder.WriteHeaderBlock(&buf, tc.headers...)
 		assert.Nil(t, err)
-
-		fmt.Println("encoded", hex.EncodeToString(buf.Bytes()))
 
 		encoded, err := hex.DecodeString(tc.hpack)
 		assert.Nil(t, err)

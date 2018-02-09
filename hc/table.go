@@ -95,7 +95,11 @@ func (table *tableCommon) LastIndex(base int) int {
 	return table.dynamic[len(table.dynamic)-1].Index(base)
 }
 
-func (table *tableCommon) getWithBaseImpl(i int, base int) Entry {
+// GetWithBase retrieves an entry relative to the specified base.
+func (table *tableCommon) GetWithBase(i int, base int) Entry {
+	if i <= 0 {
+		return nil
+	}
 	if i <= len(staticTable) {
 		return staticTable[i-1]
 	}
@@ -106,17 +110,9 @@ func (table *tableCommon) getWithBaseImpl(i int, base int) Entry {
 	return table.dynamic[dynIndex]
 }
 
-// GetWithBase retrieves an entry relative to the specified base.
-func (table *tableCommon) GetWithBase(i int, base int) Entry {
-	if i <= 0 {
-		return nil
-	}
-	return table.getWithBaseImpl(i, base)
-}
-
 // Get an entry from the table.
 func (table *tableCommon) Get(i int) Entry {
-	return table.getWithBaseImpl(i, table.base)
+	return table.GetWithBase(i, table.base)
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.

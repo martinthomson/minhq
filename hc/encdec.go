@@ -4,11 +4,11 @@ import "errors"
 
 // ErrIndexError is a decoder error for the case where an invalid index is
 // received.
-var ErrIndexError = errors.New("HPACK decoder read an invalid index")
+var ErrIndexError = errors.New("decoder read an invalid index")
 
 // ErrPseudoHeaderOrdering indicates that a pseudo header field was placed after
 // a non-pseudo header field.
-var ErrPseudoHeaderOrdering = errors.New("Pseudo header field ordering")
+var ErrPseudoHeaderOrdering = errors.New("invalid pseudo header field order")
 
 // HeaderField is the interface that header fields need to comply with.
 type HeaderField struct {

@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/martinthomson/minhq/hc"
-	minhqio "github.com/martinthomson/minhq/io"
 	"github.com/stvp/assert"
 )
 
@@ -19,7 +18,7 @@ func TestQcramEncoder(t *testing.T) {
 
 	for _, tc := range testCases {
 		if tc.resetTable {
-			encoder = hc.NewQcramEncoder(256, 256)
+			encoder = hc.NewQcramEncoder(256, 0)
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
 		} else {
@@ -65,7 +64,7 @@ func TestQcramEncoder(t *testing.T) {
 		if tc.qcramTable != nil {
 			dynamicTable = tc.qcramTable
 		}
-		checkDynamicTable(t, &encoder.Table, dynamicTable)
+		checkDynamicTable(t, encoder.Table, dynamicTable)
 	}
 }
 
@@ -87,7 +86,7 @@ func setupEncoder(t *testing.T, encoder *hc.QcramEncoder) {
 	// And two references.
 	assert.Equal(t, []byte{0x02, 0xbf, 0xbe}, headerBuf.Bytes())
 
-	checkDynamicTable(t, &encoder.Table, &tableState{
+	checkDynamicTable(t, encoder.Table, &tableState{
 		size: 86,
 		entries: []tableStateEntry{
 			{"name2", "value2"},
@@ -134,7 +133,7 @@ func TestQcramDuplicate(t *testing.T) {
 
 	assert.Equal(t, []byte{0x04, 0xbf, 0xbe}, headerBuf.Bytes())
 
-	checkDynamicTable(t, &encoder.Table, &tableState{
+	checkDynamicTable(t, encoder.Table, &tableState{
 		size: 172,
 		entries: []tableStateEntry{
 			{"name1", "value1"},
@@ -150,7 +149,7 @@ func TestQcramDuplicate(t *testing.T) {
 // TestQcramDuplicateLiteral sets up the conditions for a duplication, but the
 // table is too small to allow it.
 func TestQcramDuplicateLiteral(t *testing.T) {
-	encoder := hc.NewQcramEncoder(150, 100)
+	encoder := hc.NewQcramEncoder(150, 50)
 
 	setupEncoder(t, encoder)
 
@@ -171,7 +170,7 @@ func TestQcramDuplicateLiteral(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	checkDynamicTable(t, &encoder.Table, &tableState{
+	checkDynamicTable(t, encoder.Table, &tableState{
 		size: 129,
 		entries: []tableStateEntry{
 			{"name0", "value0"},
@@ -185,7 +184,7 @@ func TestQcramDuplicateLiteral(t *testing.T) {
 
 // Use a name reference and ensure that it can't be evicted.
 func TestQcramNameReference(t *testing.T) {
-	encoder := hc.NewQcramEncoder(150, 150)
+	encoder := hc.NewQcramEncoder(150, 0)
 
 	setupEncoder(t, encoder)
 
@@ -207,7 +206,7 @@ func TestQcramNameReference(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	checkDynamicTable(t, &encoder.Table, &tableState{
+	checkDynamicTable(t, encoder.Table, &tableState{
 		size: 129,
 		entries: []tableStateEntry{
 			{"name1", "value9"},
@@ -219,7 +218,7 @@ func TestQcramNameReference(t *testing.T) {
 
 // This tests that a name reference can be created on a literal.
 func TestNotIndexedNameReference(t *testing.T) {
-	encoder := hc.NewQcramEncoder(100, 100)
+	encoder := hc.NewQcramEncoder(100, 0)
 
 	setupEncoder(t, encoder)
 
@@ -240,7 +239,7 @@ func TestNotIndexedNameReference(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	checkDynamicTable(t, &encoder.Table, &tableState{
+	checkDynamicTable(t, encoder.Table, &tableState{
 		size: 86,
 		entries: []tableStateEntry{
 			{"name2", "value2"},
@@ -273,7 +272,7 @@ func TestQcramDecoderOrdered(t *testing.T) {
 		if tc.qcramTable != nil {
 			dynamicTable = tc.qcramTable
 		}
-		checkDynamicTable(t, &decoder.Table, dynamicTable)
+		checkDynamicTable(t, decoder.Table, dynamicTable)
 
 		encoded, err := hex.DecodeString(tc.qcramHeader)
 		assert.Nil(t, err)
@@ -314,12 +313,13 @@ func (nr *notifyingReader) Wait() {
 // corresponding header block.
 func testQcramDecoderAsync(t *testing.T, testData []testCase) {
 	var decoder *hc.QcramDecoder
-	var controlReader *minhqio.AsyncReader
+	var controlWriter io.WriteCloser
+	var controlReader io.Reader
 	controlDone := make(chan struct{})
 	headerDone := new(sync.WaitGroup)
 
 	fin := func() {
-		controlReader.Close()
+		controlWriter.Close()
 		<-controlDone
 		headerDone.Wait()
 	}
@@ -330,7 +330,7 @@ func testQcramDecoderAsync(t *testing.T, testData []testCase) {
 				fin()
 			}
 			decoder = hc.NewQcramDecoder(256)
-			controlReader = minhqio.NewAsyncReader()
+			controlReader, controlWriter = io.Pipe()
 			go func() {
 				err := decoder.ReadTableUpdates(controlReader)
 				assert.Nil(t, err)
@@ -359,7 +359,9 @@ func testQcramDecoderAsync(t *testing.T, testData []testCase) {
 			nr.Wait()
 			controlBytes, err := hex.DecodeString(tc.qcramControl)
 			assert.Nil(t, err)
-			controlReader.Send(controlBytes)
+			n, err := controlWriter.Write(controlBytes)
+			assert.Nil(t, err)
+			assert.Equal(t, len(controlBytes), n)
 		}
 	}
 	fin()

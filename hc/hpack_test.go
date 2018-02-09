@@ -24,14 +24,14 @@ func resetEncoderCapacity(t *testing.T, encoder *hc.HpackEncoder, first bool) {
 }
 
 func TestHpackEncoder(t *testing.T) {
-	var encoder hc.HpackEncoder
-	resetEncoderCapacity(t, &encoder, true)
+	encoder := hc.NewHpackEncoder(0)
+	resetEncoderCapacity(t, encoder, true)
 	// The examples in RFC 7541 index date, which is of questionable utility.
 	encoder.SetIndexPreference("date", true)
 
 	for _, tc := range testCases {
 		if tc.resetTable {
-			resetEncoderCapacity(t, &encoder, false)
+			resetEncoderCapacity(t, encoder, false)
 		}
 		if tc.huffman {
 			encoder.HuffmanPreference = hc.HuffmanCodingAlways
@@ -49,12 +49,12 @@ func TestHpackEncoder(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, encoded, buf.Bytes())
 
-		checkDynamicTable(t, &encoder.Table, &tc.hpackTable)
+		checkDynamicTable(t, encoder.Table, &tc.hpackTable)
 	}
 }
 
 func TestHpackEncoderPseudoHeaderOrder(t *testing.T) {
-	var encoder hc.HpackEncoder
+	encoder := hc.NewHpackEncoder(0)
 	var buf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&buf,
 		hc.HeaderField{Name: "regular", Value: "1", Sensitive: false},
@@ -70,13 +70,13 @@ func resetDecoderCapacity(t *testing.T, decoder *hc.HpackDecoder) {
 }
 
 func TestHpackDecoder(t *testing.T) {
-	var decoder hc.HpackDecoder
+	decoder := hc.NewHpackDecoder()
 	// Avoid an extra reset.
 	assert.True(t, testCases[0].resetTable)
 
 	for _, tc := range testCases {
 		if tc.resetTable {
-			resetDecoderCapacity(t, &decoder)
+			resetDecoderCapacity(t, decoder)
 		}
 
 		input, err := hex.DecodeString(tc.hpack)
@@ -85,12 +85,12 @@ func TestHpackDecoder(t *testing.T) {
 		assert.Nil(t, err)
 		assert.Equal(t, tc.headers, h)
 
-		checkDynamicTable(t, &decoder.Table, &tc.hpackTable)
+		checkDynamicTable(t, decoder.Table, &tc.hpackTable)
 	}
 }
 
 func TestHpackDecoderPseudoHeaderOrder(t *testing.T) {
-	var decoder hc.HpackDecoder
+	decoder := hc.NewHpackDecoder()
 	_, err := decoder.ReadHeaderBlock(bytes.NewReader([]byte{0x90, 0x81}))
 	assert.Equal(t, hc.ErrPseudoHeaderOrdering, err)
 }
@@ -107,16 +107,16 @@ func TestHpackEviction(t *testing.T) {
 		},
 	}
 
-	var encoder hc.HpackEncoder
+	encoder := hc.NewHpackEncoder(0)
 	encoder.SetCapacity(64)
 	var buf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&buf, headers...)
 	assert.Nil(t, err)
-	checkDynamicTable(t, &encoder.Table, dynamicTable)
+	checkDynamicTable(t, encoder.Table, dynamicTable)
 
-	var decoder hc.HpackDecoder
+	decoder := hc.NewHpackDecoder()
 	h, err := decoder.ReadHeaderBlock(&buf)
 	assert.Nil(t, err)
 	assert.Equal(t, headers, h)
-	checkDynamicTable(t, &decoder.Table, dynamicTable)
+	checkDynamicTable(t, decoder.Table, dynamicTable)
 }

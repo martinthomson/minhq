@@ -17,7 +17,7 @@ type tableState struct {
 	entries []tableStateEntry
 }
 
-func checkDynamicTable(t *testing.T, table *hc.Table, ts *tableState) {
+func checkDynamicTable(t *testing.T, table hc.Table, ts *tableState) {
 	assert.Equal(t, ts.size, table.Used())
 	for i, e := range ts.entries {
 		// The initial offset for dynamic entries is 62 in HPACK.

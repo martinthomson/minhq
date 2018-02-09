@@ -4,22 +4,47 @@ import (
 	"io"
 )
 
+const hpackOverhead = TableCapacity(32)
+
 // hpackEntry is an entry in the dynamic table.
 type hpackEntry struct {
 	BasicDynamicEntry
 }
 
 func (hd hpackEntry) Size() TableCapacity {
-	return TableCapacity(32 + len(hd.Name()) + len(hd.Value()))
+	return hpackOverhead + TableCapacity(len(hd.Name())+len(hd.Value()))
 }
 
-func makeHpackEntry(name string, value string) DynamicEntry {
-	return &hpackEntry{BasicDynamicEntry{name, value, 0}}
+// HpackTable is an HPACK implementation of the table.  No extra trimmings.
+type HpackTable struct {
+	tableCommon
+}
+
+// Insert for HPACK is simple.
+func (table *HpackTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
+	entry := &hpackEntry{BasicDynamicEntry{name, value, 0}}
+	table.insert(entry, nil)
+	return entry
+}
+
+// SetCapacity increases or reduces capacity to the set target.
+func (table *HpackTable) SetCapacity(capacity TableCapacity) {
+	table.evictTo(capacity, nil)
+	table.capacity = capacity
 }
 
 // HpackDecoder is the top-level class for header decompression.
 type HpackDecoder struct {
 	decoderCommon
+	table *HpackTable
+}
+
+// NewHpackDecoder makes a new decoder and sets it up.
+func NewHpackDecoder() *HpackDecoder {
+	decoder := new(HpackDecoder)
+	decoder.table = new(HpackTable)
+	decoder.Table = decoder.table
+	return decoder
 }
 
 func (decoder *HpackDecoder) readIndexed(reader *Reader) (*HeaderField, error) {
@@ -39,7 +64,7 @@ func (decoder *HpackDecoder) readIncremental(reader *Reader) (*HeaderField, erro
 	if err != nil {
 		return nil, err
 	}
-	decoder.Table.Insert(makeHpackEntry(name, value), nil)
+	decoder.Table.Insert(name, value, nil)
 	return &HeaderField{name, value, false}, nil
 }
 
@@ -48,7 +73,7 @@ func (decoder *HpackDecoder) readCapacity(reader *Reader) error {
 	if err != nil {
 		return err
 	}
-	decoder.Table.SetCapacity(TableCapacity(capacity))
+	decoder.table.SetCapacity(TableCapacity(capacity))
 	return nil
 }
 
@@ -138,9 +163,19 @@ func (decoder *HpackDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 // HpackEncoder is the top-level class for header compression.
 type HpackEncoder struct {
 	encoderCommon
+	table *HpackTable
 	// Track changes to capacity so that we can reflect them properly.
 	minCapacity  TableCapacity
 	nextCapacity TableCapacity
+}
+
+// NewHpackEncoder makes a new encoder and sets it up.
+func NewHpackEncoder(capacity TableCapacity) *HpackEncoder {
+	encoder := new(HpackEncoder)
+	encoder.table = new(HpackTable)
+	encoder.Table = encoder.table
+	encoder.SetCapacity(capacity)
+	return encoder
 }
 
 func (encoder *HpackEncoder) writeCapacity(writer *Writer, c TableCapacity) error {
@@ -156,19 +191,19 @@ func (encoder *HpackEncoder) writeCapacity(writer *Writer, c TableCapacity) erro
 }
 
 func (encoder *HpackEncoder) writeCapacityChange(writer *Writer) error {
-	if encoder.minCapacity < encoder.Table.capacity {
+	if encoder.minCapacity < encoder.Table.Capacity() {
 		err := encoder.writeCapacity(writer, encoder.minCapacity)
 		if err != nil {
 			return err
 		}
-		encoder.Table.SetCapacity(encoder.minCapacity)
+		encoder.table.SetCapacity(encoder.minCapacity)
 	}
-	if encoder.nextCapacity > encoder.Table.capacity {
+	if encoder.nextCapacity > encoder.Table.Capacity() {
 		err := encoder.writeCapacity(writer, encoder.nextCapacity)
 		if err != nil {
 			return err
 		}
-		encoder.Table.SetCapacity(encoder.nextCapacity)
+		encoder.table.SetCapacity(encoder.nextCapacity)
 		encoder.minCapacity = encoder.nextCapacity
 	}
 	return nil
@@ -192,7 +227,7 @@ func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nam
 	if err != nil {
 		return err
 	}
-	encoder.Table.Insert(makeHpackEntry(h.Name, h.Value), nil)
+	encoder.Table.Insert(h.Name, h.Value, nil)
 	return nil
 }
 

@@ -21,13 +21,13 @@ func (e testEntry) Size() hc.TableCapacity {
 }
 
 func TestInsertOverflow(t *testing.T) {
-	var table hc.Table
+	var table hc.HpackTable
 	table.SetCapacity(10)
-	assert.False(t, table.Insert(entry("name", "value"), nil))
+	assert.NotNil(t, table.Insert("name", "value", nil))
 }
 
 func TestGetInvalid(t *testing.T) {
-	var table hc.Table
+	var table hc.HpackTable
 
 	assert.Nil(t, table.Get(0))
 
@@ -35,17 +35,15 @@ func TestGetInvalid(t *testing.T) {
 	assert.Nil(t, table.Get(nextIdx))
 
 	table.SetCapacity(100)
-	e := entry("name", "value")
-	assert.True(t, table.Insert(e, nil))
+	e := table.Insert("name", "value", nil)
 	nextIdx = e.Index(table.Base()) + 1
 	assert.Nil(t, table.Get(nextIdx))
 }
 
 func TestInsertRetrieve(t *testing.T) {
-	var table hc.Table
+	var table hc.HpackTable
 	table.SetCapacity(300)
-	e := entry("name", "value")
-	assert.True(t, table.Insert(e, nil))
+	e := table.Insert("name", "value", nil)
 
 	assert.Equal(t, e, table.Get(e.Index(table.Base())))
 
@@ -58,17 +56,15 @@ func TestInsertRetrieve(t *testing.T) {
 }
 
 func TestBase(t *testing.T) {
-	var table hc.Table
+	var table hc.HpackTable
 	table.SetCapacity(300)
 
 	dynamicOffset := table.LastIndex(table.Base()) + 1
 	assert.Equal(t, 62, dynamicOffset)
 
-	e1 := entry("name1", "value1")
-	assert.True(t, table.Insert(e1, nil))
+	e1 := table.Insert("name1", "value1", nil)
 	assert.Equal(t, 1, table.Base())
-	e2 := entry("name2", "value2")
-	assert.True(t, table.Insert(e2, nil))
+	e2 := table.Insert("name2", "value2", nil)
 	assert.Equal(t, 2, table.Base())
 
 	// Check that the table is in a reasonable state.
@@ -93,13 +89,11 @@ func TestBase(t *testing.T) {
 }
 
 func TestInsertEvict(t *testing.T) {
-	var table hc.Table
+	var table hc.HpackTable
 	table.SetCapacity(64) // Enough room for two values exactly.
-	assert.True(t, table.Insert(entry("name1", "value1"), nil))
-	second := entry("name2", "value2")
-	assert.True(t, table.Insert(second, nil))
-	third := entry("name3", "value3")
-	assert.True(t, table.Insert(third, nil))
+	assert.NotNil(t, table.Insert("name1", "value1", nil))
+	second := table.Insert("name2", "value2", nil)
+	third := table.Insert("name3", "value3", nil)
 	m, _ := table.Lookup("name1", "value1")
 	assert.Nil(t, m)
 	m, _ = table.Lookup(second.Name(), second.Value())
@@ -109,7 +103,7 @@ func TestInsertEvict(t *testing.T) {
 }
 
 func TestLookupStatic(t *testing.T) {
-	var table hc.Table
+	var table hc.HpackTable
 	m, nm := table.Lookup(":method", "GET")
 	assert.Equal(t, 2, m.Index(0))
 	assert.Equal(t, 2, nm.Index(77))

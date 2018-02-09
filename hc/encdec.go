@@ -81,7 +81,7 @@ func (encoder encoderCommon) shouldIndex(h HeaderField) bool {
 		"refresh":             true,
 	}
 
-	if TableCapacity(len(h.Name)+len(h.Value)+32) > encoder.Table.capacity {
+	if TableCapacity(len(h.Name)+len(h.Value)+32) > encoder.Table.Capacity() {
 		return false
 	}
 	pref, ok := encoder.indexPrefs[h.Name]

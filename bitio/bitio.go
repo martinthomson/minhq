@@ -14,6 +14,10 @@ type BitWriter struct {
 
 // NewBitWriter makes a new BitWriter.
 func NewBitWriter(writer io.Writer) *BitWriter {
+	bw, ok := writer.(*BitWriter)
+	if ok {
+		return bw
+	}
 	return &BitWriter{writer, 0, 0}
 }
 
@@ -131,8 +135,12 @@ type BitReader struct {
 	savedBits byte
 }
 
-// NewBitReader makes a new BitWriter.
+// NewBitReader makes a new BitWriter.  If the reader is already a BitReader, return that instead.
 func NewBitReader(reader io.Reader) *BitReader {
+	br, ok := reader.(*BitReader)
+	if ok {
+		return br
+	}
 	return &BitReader{reader, 0, 0}
 }
 
@@ -219,7 +227,9 @@ func (br *BitReader) ReadByte() (byte, error) {
 	return byte(b), err
 }
 
-// Read so that we can claim to support the io.Reader interface.
+// Read so that we can claim to support the io.Reader interface. This does
+// unaligned reads if it is preceded by reads for a number of bits that aren't a
+// whole multiple of 8.
 func (br *BitReader) Read(p []byte) (int, error) {
 	if br.savedBits == 0 {
 		return br.reader.Read(p)

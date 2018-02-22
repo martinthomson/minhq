@@ -9,6 +9,19 @@ import (
 	"github.com/stvp/assert"
 )
 
+func TestWriterWrap(t *testing.T) {
+	var buf bytes.Buffer
+	bw1 := bitio.NewBitWriter(&buf)
+	bw2 := bitio.NewBitWriter(bw1)
+	assert.Equal(t, bw1, bw2)
+
+	p := []byte{1, 2, 3}
+	n, err := bw1.Write(p)
+	assert.Nil(t, err)
+	assert.Equal(t, len(p), n)
+	assert.Equal(t, p, buf.Bytes())
+}
+
 func TestWriter(t *testing.T) {
 	var buf bytes.Buffer
 	writer := bitio.NewBitWriter(&buf)
@@ -81,6 +94,19 @@ func TestWriteError(t *testing.T) {
 	assert.NotNil(t, writer.WriteBits(2, 1))
 }
 
+func TestReaderWrap(t *testing.T) {
+	p := []byte{1, 2, 3}
+	buf := bytes.NewBuffer(p)
+	br1 := bitio.NewBitReader(buf)
+	br2 := bitio.NewBitReader(br1)
+	assert.Equal(t, br1, br2)
+	r := make([]byte, len(p))
+	n, err := br1.Read(r)
+	assert.Nil(t, err)
+	assert.Equal(t, len(p), n)
+	assert.Equal(t, p, r)
+}
+
 func TestReader(t *testing.T) {
 	buf := bytes.NewReader([]byte{0x40, 0xaa, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
 		0x3f, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xe0})
@@ -109,30 +135,4 @@ func TestReader(t *testing.T) {
 	v, err = reader.ReadBits(5)
 	assert.Nil(t, err)
 	assert.Equal(t, uint64(0x03>>3), v)
-}
-
-type blockingByteReader struct {
-	reader    io.ByteReader
-	readsLeft int
-}
-
-// ReadByte reads, unless readsLeft hits zero.
-func (bbr *blockingByteReader) ReadByte() (byte, error) {
-	bbr.readsLeft -= 1
-	if bbr.readsLeft == 0 {
-		return 0, io.ErrNoProgress
-	}
-	return bbr.reader.ReadByte()
-}
-
-// Read fulfills the io.Writer contract.
-func (bbr *blockingByteReader) Read(p []byte) (int, error) {
-	for i := range p {
-		b, err := bbr.ReadByte()
-		if err != nil {
-			return i, err
-		}
-		p[i] = b
-	}
-	return len(p), nil
 }

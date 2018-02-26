@@ -18,7 +18,7 @@ type Reader struct {
 
 // NewReader wraps the reader with HPACK-specific reading functions.
 func NewReader(reader io.Reader) *Reader {
-	return &Reader{*bitio.NewBitReader(reader)}
+	return &Reader{bitio.NewBitReader(reader)}
 }
 
 // ReadInt reads an HPACK integer with the specified prefix length.
@@ -101,7 +101,7 @@ type Writer struct {
 
 // NewWriter wraps the writer with HPACK-specific writing functions.
 func NewWriter(writer io.Writer) *Writer {
-	return &Writer{*bitio.NewBitWriter(writer)}
+	return &Writer{bitio.NewBitWriter(writer)}
 }
 
 // WriteInt writes an integer of the specific prefix length.

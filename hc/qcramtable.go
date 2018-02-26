@@ -220,3 +220,13 @@ func (qt *QcramEncoderTable) Acknowledge(token interface{}) {
 		qe.removeUse(token)
 	}
 }
+
+// SetCapacity sets the table capacity. This panics if it is called after an
+// entry has been inserted. For safety, only set this to a non-zero value from a
+// zero value.
+func (qt *QcramEncoderTable) SetCapacity(c TableCapacity) {
+	if qt.Base() > 0 {
+		panic("Can't change encoder table size after inserting anything")
+	}
+	qt.capacity = c
+}

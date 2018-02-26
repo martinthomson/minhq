@@ -9,7 +9,7 @@ import (
 
 // HuffmanCompressor is a progressive compressor for Huffman-encoded data.
 type HuffmanCompressor struct {
-	writer    *bitio.BitWriter
+	writer    bitio.BitWriter
 	saved     byte
 	savedBits byte
 }
@@ -88,7 +88,7 @@ func initDecompressorTree() {
 
 // HuffmanDecompressor is the opposite of huffmanCompressor
 type HuffmanDecompressor struct {
-	reader *bitio.BitReader
+	reader bitio.BitReader
 	cursor *huffmanDecoderNode
 }
 

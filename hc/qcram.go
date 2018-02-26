@@ -3,6 +3,7 @@ package hc
 import (
 	"errors"
 	"io"
+	"sync"
 )
 
 // ErrTableUpdateInHeaderBlock shouldn't exist, but this is an early version of QCRAM.
@@ -226,11 +227,11 @@ func (state *qcramWriterState) addUse(i int) {
 	}
 }
 
-// QcramEncoder performs header compression using QCRAM. This is not a
-// thread-safe object, all writes need to be serialized.
+// QcramEncoder performs header compression using QCRAM.
 type QcramEncoder struct {
 	encoderCommon
 	table *QcramEncoderTable
+	mutex sync.RWMutex
 }
 
 // NewQcramEncoder creates a new QcramEncoder and sets it up.
@@ -300,6 +301,10 @@ func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState
 func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *qcramWriterState) error {
 	w := NewWriter(controlWriter)
 
+	// Only one goroutine can update the table at once.
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
+
 	for i := range state.headers {
 		// Make sure to write into the slice rather than use a copy of each header.
 		h := state.headers[i]
@@ -352,7 +357,7 @@ func (encoder *QcramEncoder) writeIndexed(writer *Writer, state *qcramWriterStat
 	return writer.WriteInt(uint64(state.matches[i].Index(state.largestBase)), 7)
 }
 
-func (encoder QcramEncoder) writeLiteral(writer *Writer, state *qcramWriterState, i int) error {
+func (encoder *QcramEncoder) writeLiteral(writer *Writer, state *qcramWriterState, i int) error {
 	h := state.headers[i]
 	var code uint64
 	if h.Sensitive {
@@ -374,6 +379,10 @@ func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcr
 		return err
 	}
 
+	// Make sure that we don't read over writes.
+	defer encoder.mutex.RUnlock()
+	encoder.mutex.RLock()
+
 	for i := range state.headers {
 		var err error
 		if state.matches[i] != nil {
@@ -386,18 +395,6 @@ func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcr
 		}
 	}
 	return nil
-}
-
-// clearEvictedMatches ensures that we don't retain any references to entries
-// that were evicted while inserting header fields.
-func (encoder *QcramEncoder) clearEvictedMatches(entries []Entry) {
-	base := encoder.Table.Base()
-	lastIndex := encoder.Table.LastIndex(base)
-	for i := range entries {
-		if entries[i] != nil && entries[i].Index(base) > lastIndex {
-			entries[i] = nil
-		}
-	}
 }
 
 // WriteHeaderBlock writes out a header block.  controlWriter is the control stream writer
@@ -419,9 +416,6 @@ func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWri
 		return err
 	}
 
-	encoder.clearEvictedMatches(state.matches)
-	encoder.clearEvictedMatches(state.nameMatches)
-
 	return encoder.writeHeaderBlock(headerWriter, &state)
 }
 
@@ -429,5 +423,15 @@ func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWri
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
 func (encoder *QcramEncoder) Acknowledge(token interface{}) {
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
 	encoder.table.Acknowledge(token)
+}
+
+// SetCapacity sets the table capacity. This panics if it is called when the
+// capacity has already been set to a non-zero value.
+func (encoder *QcramEncoder) SetCapacity(c TableCapacity) {
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
+	encoder.table.SetCapacity(c)
 }

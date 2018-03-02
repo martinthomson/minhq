@@ -61,7 +61,7 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 
 	headers, err := c.decoder.ReadHeaderBlock(r)
 	if err != nil {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 		return
 	}
 
@@ -81,7 +81,7 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 	for t, f, r, err = s.ReadFrame(); err == nil; {
 		if done {
 			// Can't receive any other frame after trailers.
-			c.fatalError(ErrWtf)
+			c.FatalError(ErrWtf)
 			return
 		}
 
@@ -92,7 +92,7 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 			done = true
 			headers, err = c.decoder.ReadHeaderBlock(r)
 			if err != nil {
-				c.fatalError(ErrWtf)
+				c.FatalError(ErrWtf)
 				return
 			}
 			trailers <- headers
@@ -103,14 +103,14 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 				return
 			}
 		default:
-			c.fatalError(ErrWtf)
+			c.FatalError(ErrWtf)
 			return
 		}
 	}
 	if err == io.EOF {
 		close(data)
 	} else if err != nil {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 	}
 }
 

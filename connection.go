@@ -8,6 +8,7 @@ import (
 
 	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/hc"
+	"github.com/martinthomson/minhq/mw"
 )
 
 type HttpError uint16
@@ -35,24 +36,6 @@ var ErrInvalidFrame = errors.New("Invalid frame type for context")
 
 type Config struct {
 	DecoderTableCapacity hc.TableCapacity
-}
-
-type minqHandler struct {
-	streamReadable map[*minq.Stream]chan<- struct{}
-}
-
-func (sh *minqHandler) add(s *minq.Stream) <-chan struct{} {
-	ch := make(chan struct{})
-	sh.streamReadable[s] = ch
-	return ch
-}
-
-func (sh *minqHandler) StateChanged(s minq.State) {}
-func (sh *minqHandler) NewStream(s *minq.Stream) {
-	// TODO handle push promises
-}
-func (sh *minqHandler) StreamReadable(s *minq.Stream) {
-	sh.streamReadable[s] <- struct{}{}
 }
 
 type outstandingHeaderBlock struct {
@@ -87,10 +70,13 @@ func (oh *outstandingHeaders) ack(id uint64) *requestId {
 	return &requestId{id, o.acknowledged}
 }
 
+type FrameHandler interface {
+	HandleFrame(frameType, byte, FrameReader) error
+}
+
 type Connection struct {
-	config      Config
-	connection  *minq.Connection
-	minqHandler *minqHandler
+	config Config
+	mw.Connection
 
 	decoder         *hc.QcramDecoder
 	encoder         *hc.QcramEncoder
@@ -99,29 +85,23 @@ type Connection struct {
 	headerAckStream *stream
 	outstanding     outstandingHeaders
 
-	maxPushId uint64
+	unknownFrameHandler FrameHandler
 }
 
-func (c *Connection) createStream() *stream {
-	s := c.connection.CreateStream()
-	return newStream(s, c.minqHandler.add(s))
-}
+func (c *Connection) Init(fh FrameHandler) {
+	c.unknownFrameHandler = fh
 
-func (c *Connection) init() {
-	handler := &minqHandler{}
-	c.connection.SetHandler(handler)
-	c.minqHandler = handler
-
-	c.controlStream = c.createStream()
-	c.headersStream = c.createStream()
-	c.headerAckStream = c.createStream()
+	// TODO unidirectional
+	c.controlStream = newStream(c.CreateStream())
+	c.headersStream = newStream(c.CreateStream())
+	c.headerAckStream = newStream(c.CreateStream())
 	go c.serviceControlStream()
 	go c.serviceHeadersStream()
 	go c.serviceHeaderAckStream()
 }
 
-func (c *Connection) fatalError(err HttpError) {
-	c.connection.Close( /* TODO Application Close for minq */ )
+func (c *Connection) FatalError(e HttpError) {
+	c.Close()
 }
 
 type settingsWriter struct {
@@ -159,7 +139,7 @@ func (c *Connection) checkExtraData(r io.Reader) error {
 	var p [1]byte
 	n, err := r.Read(p[:])
 	if err != nil && err != io.EOF {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 		return err
 	}
 	if n > 0 {
@@ -172,25 +152,10 @@ func (c *Connection) handlePriority(f byte, r io.Reader) error {
 	// TODO implement something useful
 	_, err := io.Copy(ioutil.Discard, r)
 	if err != nil {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 		return err
 	}
 	return nil
-}
-
-func (c *Connection) handleMaxPushId(f byte, r FrameReader) error {
-	if f != 0 {
-		return ErrNonZeroFlags
-	}
-	n, err := r.ReadVarint()
-	if err != nil {
-		c.fatalError(ErrWtf)
-		return err
-	}
-	if n > c.maxPushId {
-		c.maxPushId = n
-	}
-	return c.checkExtraData(r)
 }
 
 func (c *Connection) readSettings(r FrameReader) error {
@@ -228,43 +193,41 @@ func (c *Connection) serviceControlStream() {
 	writer := NewFrameWriter(c.controlStream)
 	err := writer.WriteFrame(frameSettings, 0, &settingsWriter{&c.config})
 	if err != nil {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 		return
 	}
 
 	t, f, r, err := reader.ReadFrame()
 	if err != nil {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 		return
 	}
 
 	if t != frameSettings || f != 0 {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 		return
 	}
 
 	err = c.readSettings(r)
 	if err != nil {
-		c.fatalError(ErrWtf)
+		c.FatalError(ErrWtf)
 		return
 	}
 
 	for {
 		t, f, r, err = reader.ReadFrame()
 		if err != nil {
-			c.fatalError(ErrWtf)
+			c.FatalError(ErrWtf)
 			return
 		}
 		switch t {
 		case framePriority:
 			err = c.handlePriority(f, r)
-		case frameMaxPushId:
-			err = c.handleMaxPushId(f, r)
 		default:
-			err = ErrInvalidFrame
+			err = c.unknownFrameHandler.HandleFrame(t, f, r)
 		}
 		if err != nil {
-			c.fatalError(ErrWtf)
+			c.FatalError(ErrWtf)
 			return
 		}
 	}
@@ -272,8 +235,8 @@ func (c *Connection) serviceControlStream() {
 
 func (c *Connection) serviceHeadersStream() {
 	_ = c.decoder.ReadTableUpdates(c.headersStream)
-	if c.connection.GetState() != minq.StateClosed {
-		c.fatalError(ErrWtf)
+	if c.GetState() != minq.StateClosed {
+		c.FatalError(ErrWtf)
 	}
 }
 
@@ -281,12 +244,12 @@ func (c *Connection) serviceHeaderAckStream() {
 	for {
 		n, err := c.headerAckStream.ReadVarint()
 		if err != nil {
-			c.fatalError(ErrWtf)
+			c.FatalError(ErrWtf)
 			return
 		}
 		reqId := c.outstanding.ack(n)
 		if reqId == nil {
-			c.fatalError(ErrWtf)
+			c.FatalError(ErrWtf)
 			return
 		}
 

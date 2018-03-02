@@ -7,6 +7,7 @@ import (
 
 	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/hc"
+	"github.com/martinthomson/minhq/mw"
 )
 
 type ClientConnection struct {
@@ -17,15 +18,19 @@ type ClientConnection struct {
 func NewClientConnection(qc *minq.Connection, config Config) *ClientConnection {
 	hq := &ClientConnection{
 		Connection: Connection{
-			connection: qc,
+			Connection: *mw.NewConnection(qc),
 
 			decoder: hc.NewQcramDecoder(config.DecoderTableCapacity),
 			encoder: hc.NewQcramEncoder(0, 0),
 		},
 		requestId: 0,
 	}
-	hq.init()
+	hq.Init(hq)
 	return hq
+}
+
+func (c *ClientConnection) HandleFrame(t frameType, f byte, r FrameReader) error {
+	return ErrInvalidFrame
 }
 
 func (c *ClientConnection) nextRequestId() *requestId {
@@ -53,7 +58,7 @@ func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderFiel
 	copy(allHeaders[4:], h)
 
 	requestId := c.nextRequestId()
-	s := c.createStream()
+	s := newStream(c.CreateStream())
 	writer := NewFrameWriter(s)
 	_, err = writer.WriteVarint(requestId.id)
 	if err != nil {

@@ -1,42 +1,26 @@
 package minhq
 
 import (
-	"io"
-
 	"github.com/ekr/minq"
+	"github.com/martinthomson/minhq/mw"
 )
-
-type minqReadWrapper struct {
-	r        io.Reader
-	readable <-chan struct{}
-}
-
-func (w *minqReadWrapper) Read(p []byte) (int, error) {
-	n, err := w.r.Read(p)
-	if err == minq.ErrorWouldBlock {
-		<-w.readable
-		n, err = w.r.Read(p)
-	}
-	return n, err
-}
 
 type stream struct {
 	FrameWriter
 	FrameReader
-	s *minq.Stream
+	s *mw.Stream
 }
 
-func newStream(s *minq.Stream, readable <-chan struct{}) *stream {
+func newStream(s *mw.Stream) *stream {
 	return &stream{
 		NewFrameWriter(s),
-		NewFrameReader(&minqReadWrapper{s, readable}),
+		NewFrameReader(s),
 		s,
 	}
 }
 
 func (s *stream) Close() error {
-	s.s.Close()
-	return nil
+	return s.s.Close()
 }
 
 func (s *stream) Reset(err minq.ErrorCode) error {

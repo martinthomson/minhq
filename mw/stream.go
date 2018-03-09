@@ -10,93 +10,91 @@ import (
 // a unidirectional stream of the current type was attempted.
 var ErrUnidirectional = errors.New("Operation not supported on this stream type")
 
-// TODO: structure this more sensibly, so that SendStream and RecvStream don't
-// implement each other. That requires more breaking down that I'm prepared for
-// right now.
-
-// Stream is a wrapper around minq.Stream.
-type Stream struct {
+type SendStream struct {
 	c    *Connection
-	id   uint64
-	send minq.SendStream
-	recv minq.RecvStream
+	minq minq.SendStream
 }
 
-func (ms *Stream) io(channel chan<- *ioRequest, p []byte) (int, error) {
+var _ minq.SendStream = &SendStream{}
+
+// Id calls minq.SendStream.Id() directly on the assumption that this value is immutable.
+func (s *SendStream) Id() uint64 {
+	return s.minq.Id()
+}
+
+// SendState proxies a request for the current state.
+func (s *SendStream) SendState() minq.SendStreamState {
+	result := make(chan minq.SendStreamState)
+	s.c.ops.getSendState <- &getSendStateRequest{s, result}
+	return <-result
+}
+
+// Write implements the io.Writer interface.
+func (s *SendStream) Write(p []byte) (int, error) {
 	result := make(chan *ioResult)
-	req := &ioRequest{ms.c, ms, p, result}
-	channel <- req
+	req := &writeRequest{ioRequest{s.c, p, result}, s}
+	s.c.ops.write <- req
 	resp := <-result
 	return resp.n, resp.err
 }
 
-// Id calls minq.Stream.Id() directly on the assumption that this value is immutable.
-func (ms *Stream) Id() uint64 {
-	return ms.id
-}
-
-// Read implements the io.Reader interface.
-func (ms *Stream) Read(p []byte) (int, error) {
-	return ms.io(ms.c.ops.read, p)
-}
-
-// Write implements the io.Writer interface.
-func (ms *Stream) Write(p []byte) (int, error) {
-	return ms.io(ms.c.ops.write, p)
-}
-
 // Reset kills a stream (outbound only).
-func (ms *Stream) Reset(err minq.ErrorCode) error {
+func (s *SendStream) Reset(err minq.ErrorCode) error {
 	result := make(chan error)
-	ms.c.ops.reset <- &resetRequest{ms.c, ms, err, result}
-	return <-result
-}
-
-// StopSending currently does nothing because minq doesn't support it.
-func (ms *Stream) StopSending() error {
-	result := make(chan error)
-	ms.c.ops.stopSending <- &stopRequest{ms.c, ms, result}
+	s.c.ops.reset <- &resetRequest{s.c, s, err, result}
 	return <-result
 }
 
 // Close implements io.Closer, but it only affects the write side (I think).
-func (ms *Stream) Close() error {
+func (s *SendStream) Close() error {
 	result := make(chan error)
-	ms.c.ops.closeStream <- &stopRequest{ms.c, ms, result}
+	s.c.ops.closeStream <- &closeStreamRequest{s.c, s, result}
 	return <-result
 }
 
-// SendStream is a stream with receive parts disabled.  Pure sugar.
-type SendStream struct {
-	Stream
-}
-
-// Read is disabled.
-func (ms *SendStream) Read(p []byte) (int, error) {
-	return 0, ErrUnidirectional
-}
-
-// StopSending is disabled.
-func (ms *SendStream) StopSending() error {
-	return ErrUnidirectional
-}
-
-// RecvStream is a stream with send parts disabled.  Pure sugar.
+// RecvStream wraps minq.RecvStream.
 type RecvStream struct {
-	Stream
+	c    *Connection
+	minq minq.RecvStream
 }
 
-// Write is disabled.
-func (ms *RecvStream) Write(p []byte) (int, error) {
-	return 0, ErrUnidirectional
+// Id calls minq.SendStream.Id() directly on the assumption that this value is immutable.
+func (s *RecvStream) Id() uint64 {
+	return s.minq.Id()
 }
 
-// Reset is disabled.
-func (ms *RecvStream) Reset(minq.ErrorCode) error {
-	return ErrUnidirectional
+// RecvState proxies a request for the current state.
+func (s *RecvStream) RecvState() minq.RecvStreamState {
+	result := make(chan minq.RecvStreamState)
+	s.c.ops.getRecvState <- &getRecvStateRequest{s, result}
+	return <-result
 }
 
-// Close is disabled.
-func (ms *RecvStream) Close() error {
-	return ErrUnidirectional
+// Read implements the io.Reader interface.
+func (s *RecvStream) Read(p []byte) (int, error) {
+	result := make(chan *ioResult)
+	req := &readRequest{ioRequest{s.c, p, result}, s}
+	s.c.ops.read <- req
+	resp := <-result
+	return resp.n, resp.err
+}
+
+// StopSending currently does nothing because minq doesn't support it.
+func (s *RecvStream) StopSending(code minq.ErrorCode) error {
+	result := make(chan error)
+	s.c.ops.stopSending <- &stopRequest{s.c, s, code, result}
+	return <-result
+}
+
+// Stream is a wrapper around minq.Stream.
+type Stream struct {
+	SendStream
+	RecvStream
+}
+
+var _ minq.Stream = &Stream{}
+
+// Id calls into SendStream (both SendStream and RecvStream should produce the same answer).
+func (s *Stream) Id() uint64 {
+	return s.SendStream.Id()
 }

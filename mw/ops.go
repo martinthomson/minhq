@@ -15,14 +15,23 @@ type getStateRequest struct {
 	result chan<- minq.State
 }
 
+type getSendStateRequest struct {
+	s      *SendStream
+	result chan<- minq.SendStreamState
+}
+type getRecvStateRequest struct {
+	s      *RecvStream
+	result chan<- minq.RecvStreamState
+}
+
 type createBidiStreamRequest struct {
 	c      *Connection
-	result chan<- *Stream
+	result chan<- minq.Stream
 }
 
 type createUniStreamRequest struct {
 	c      *Connection
-	result chan<- *SendStream
+	result chan<- minq.SendStream
 }
 
 type ioResult struct {
@@ -32,21 +41,37 @@ type ioResult struct {
 
 type ioRequest struct {
 	c      *Connection
-	s      *Stream
 	p      []byte
 	result chan<- *ioResult
 }
 
+type writeRequest struct {
+	ioRequest
+	s *SendStream
+}
+
+type readRequest struct {
+	ioRequest
+	s *RecvStream
+}
+
 type resetRequest struct {
 	c      *Connection
-	s      *Stream
+	s      *SendStream
 	err    minq.ErrorCode // TODO application error code
+	result chan<- error
+}
+
+type closeStreamRequest struct {
+	c      *Connection
+	s      *SendStream
 	result chan<- error
 }
 
 type stopRequest struct {
 	c      *Connection
-	s      *Stream
+	s      *RecvStream
+	code   minq.ErrorCode
 	result chan<- error
 }
 
@@ -59,11 +84,13 @@ type connectionOperations struct {
 	getState         chan *getStateRequest
 	createBidiStream chan *createBidiStreamRequest
 	createUniStream  chan *createUniStreamRequest
-	read             chan *ioRequest
-	write            chan *ioRequest
+	getSendState     chan *getSendStateRequest
+	write            chan *writeRequest
 	reset            chan *resetRequest
+	closeStream      chan *closeStreamRequest
+	getRecvState     chan *getRecvStateRequest
+	read             chan *readRequest
 	stopSending      chan *stopRequest
-	closeStream      chan *stopRequest
 	closeConnection  chan *closeConnectionRequest
 }
 
@@ -72,11 +99,13 @@ func newConnectionOperations() *connectionOperations {
 		getState:         make(chan *getStateRequest),
 		createBidiStream: make(chan *createBidiStreamRequest),
 		createUniStream:  make(chan *createUniStreamRequest),
-		read:             make(chan *ioRequest),
-		write:            make(chan *ioRequest),
+		getSendState:     make(chan *getSendStateRequest),
+		write:            make(chan *writeRequest),
 		reset:            make(chan *resetRequest),
+		closeStream:      make(chan *closeStreamRequest),
+		getRecvState:     make(chan *getRecvStateRequest),
+		read:             make(chan *readRequest),
 		stopSending:      make(chan *stopRequest),
-		closeStream:      make(chan *stopRequest),
 		closeConnection:  make(chan *closeConnectionRequest),
 	}
 }
@@ -93,40 +122,47 @@ func (ops *connectionOperations) Select() {
 	case createStreamReq := <-ops.createBidiStream:
 		c := createStreamReq.c
 		s := c.minq.CreateBidirectionalStream()
-		createStreamReq.result <- &Stream{c, s.Id(), s, s}
+		createStreamReq.result <- &Stream{SendStream{c, s}, RecvStream{c, s}}
 
 	case createStreamReq := <-ops.createUniStream:
 		c := createStreamReq.c
 		s := c.minq.CreateUnidirectionalStream()
-		createStreamReq.result <- &SendStream{Stream{c, s.Id(), s, nil}}
+		createStreamReq.result <- &SendStream{c, s}
+
+	case sendStateReq := <-ops.getSendState:
+		sendStateReq.result <- sendStateReq.s.minq.SendState()
+
+	case writeReq := <-ops.write:
+		n, err := writeReq.s.minq.Write(writeReq.p)
+		writeReq.result <- &ioResult{n, err}
+
+	case closeReq := <-ops.closeStream:
+		closeReq.s.minq.Close()
+		closeReq.result <- nil
+
+	case resetReq := <-ops.reset:
+		resetReq.result <- resetReq.s.minq.Reset(resetReq.err)
+
+	case recvStateReq := <-ops.getRecvState:
+		recvStateReq.result <- recvStateReq.s.minq.RecvState()
 
 	case readReq := <-ops.read:
 		readReq.c.handleReadRequest(readReq)
 
-	case writeReq := <-ops.write:
-		n, err := writeReq.s.send.Write(writeReq.p)
-		writeReq.result <- &ioResult{n, err}
-
-	case closeReq := <-ops.closeStream:
-		closeReq.s.send.Close()
-		closeReq.result <- nil
-
-	case resetReq := <-ops.reset:
-		resetReq.result <- resetReq.s.send.Reset(resetReq.err)
-
 	case stopSendingReq := <-ops.stopSending:
-		// TODO minq doesn't support stop sending
+
 		// Note that closing the channel shouldn't be necessary, but caution is
 		// always welcome in these matters.
 		c := stopSendingReq.c
-		state := c.readState[stopSendingReq.s.recv]
+		s := stopSendingReq.s
+		state := c.readState[s.minq]
 		if state != nil {
 			if state.reader != nil {
 				close(state.reader.result)
 			}
-			delete(c.readState, stopSendingReq.s.recv)
+			delete(c.readState, s.minq)
 		}
-		stopSendingReq.result <- nil
+		stopSendingReq.result <- s.StopSending(stopSendingReq.code)
 
 	default:
 		// Do nothing
@@ -145,8 +181,8 @@ func (ops *connectionOperations) Close() error {
 		case cs := <-ops.createUniStream:
 			close(cs.result)
 
-		case r := <-ops.read:
-			r.result <- &ioResult{0, ErrConnectionClosed}
+		case ss := <-ops.getSendState:
+			ss.result <- ss.s.minq.SendState()
 
 		case w := <-ops.write:
 			w.result <- &ioResult{0, ErrConnectionClosed}
@@ -156,6 +192,12 @@ func (ops *connectionOperations) Close() error {
 
 		case cs := <-ops.closeStream:
 			cs.result <- nil
+
+		case rs := <-ops.getRecvState:
+			rs.result <- rs.s.minq.RecvState()
+
+		case r := <-ops.read:
+			r.result <- &ioResult{0, ErrConnectionClosed}
 
 		case ss := <-ops.stopSending:
 			ss.result <- nil

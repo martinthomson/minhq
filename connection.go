@@ -80,9 +80,9 @@ type Connection struct {
 
 	decoder         *hc.QcramDecoder
 	encoder         *hc.QcramEncoder
-	controlStream   *stream
-	headersStream   *stream
-	headerAckStream *stream
+	controlStream   *sendStream
+	headersStream   *sendStream
+	headerAckStream *sendStream
 	outstanding     outstandingHeaders
 
 	unknownFrameHandler FrameHandler
@@ -92,9 +92,9 @@ func (c *Connection) Init(fh FrameHandler) {
 	c.unknownFrameHandler = fh
 
 	// TODO unidirectional
-	c.controlStream = newStream(c.CreateStream())
-	c.headersStream = newStream(c.CreateStream())
-	c.headerAckStream = newStream(c.CreateStream())
+	c.controlStream = newSendStream(c.CreateUnidirectionalStream())
+	c.headersStream = newSendStream(c.CreateUnidirectionalStream())
+	c.headerAckStream = newSendStream(c.CreateUnidirectionalStream())
 	go c.serviceControlStream()
 	go c.serviceHeadersStream()
 	go c.serviceHeaderAckStream()
@@ -130,8 +130,6 @@ func (c *Connection) handlePriority(f byte, r io.Reader) error {
 // This spits out a SETTINGS frame and then sits there reading the control
 // stream until it encounters an error.
 func (c *Connection) serviceControlStream() {
-	reader := NewFrameReader(c.controlStream)
-	writer := NewFrameWriter(c.controlStream)
 	var buf bytes.Buffer
 	sw := settingsWriter{&c.config}
 	n, err := sw.WriteTo(&buf)
@@ -139,12 +137,13 @@ func (c *Connection) serviceControlStream() {
 		c.FatalError(ErrWtf)
 		return
 	}
-	err = writer.WriteFrame(frameSettings, 0, buf.Bytes())
+	err = c.controlStream.WriteFrame(frameSettings, 0, buf.Bytes())
 	if err != nil {
 		c.FatalError(ErrWtf)
 		return
 	}
 
+reader := <- c.remoteControlStream
 	t, f, r, err := reader.ReadFrame()
 	if err != nil {
 		c.FatalError(ErrWtf)

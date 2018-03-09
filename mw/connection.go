@@ -16,7 +16,7 @@ type Packet struct {
 
 type readState struct {
 	readable bool
-	reader   *ioRequest
+	reader   *readRequest
 }
 
 func (state *readState) readFrom(minqs minq.RecvStream) {
@@ -41,11 +41,11 @@ type Connection struct {
 	connected chan<- *Connection
 	closed    chan struct{}
 	// RemoteStreams is an unbuffered channel of streams created by a peer.
-	RemoteStreams <-chan *Stream
-	remoteStreams chan<- *Stream
+	RemoteStreams <-chan minq.Stream
+	remoteStreams chan<- minq.Stream
 	// RemoteRecvStreams is an unbuffered channel of unidirectional streams created by a peer.
-	RemoteRecvStreams <-chan *RecvStream
-	remoteRecvStreams chan<- *RecvStream
+	RemoteRecvStreams <-chan minq.RecvStream
+	remoteRecvStreams chan<- minq.RecvStream
 	// IncomingPackets are packets that arrive at the connection.
 	IncomingPackets chan<- *Packet
 	incomingPackets <-chan *Packet
@@ -57,8 +57,8 @@ type Connection struct {
 
 func newConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
 	connected := make(chan *Connection)
-	streams := make(chan *Stream)
-	recvStreams := make(chan *RecvStream)
+	streams := make(chan minq.Stream)
+	recvStreams := make(chan minq.RecvStream)
 	c := &Connection{
 		minq:              mc,
 		Connected:         connected,
@@ -142,12 +142,12 @@ func (c *Connection) StateChanged(s minq.State) {
 
 // NewStream is required by the minq.ConnectionHandler interface.
 func (c *Connection) NewStream(s minq.Stream) {
-	c.remoteStreams <- &Stream{c, s.Id(), s, s}
+	c.remoteStreams <- &Stream{SendStream{c, s}, RecvStream{c, s}}
 }
 
 // NewRecvStream is required by the minq.ConnectionHandler interface.
 func (c *Connection) NewRecvStream(s minq.RecvStream) {
-	c.remoteRecvStreams <- &RecvStream{Stream{c, s.Id(), nil, s}}
+	c.remoteRecvStreams <- &RecvStream{c, s}
 }
 
 // StreamReadable is required by the minq.ConnectionHandler interface.
@@ -162,17 +162,17 @@ func (c *Connection) StreamReadable(s minq.RecvStream) {
 	state.readFrom(s)
 }
 
-func (c *Connection) handleReadRequest(req *ioRequest) {
-	state := c.readState[req.s.recv]
+func (c *Connection) handleReadRequest(req *readRequest) {
+	state := c.readState[req.s.minq]
 	if state == nil {
 		state = &readState{false, req}
-		c.readState[req.s.recv] = state
+		c.readState[req.s.minq] = state
 	} else if state.reader == nil {
 		state.reader = req
 	} else {
 		panic("Concurrent reads from the same stream")
 	}
-	state.readFrom(req.s.recv)
+	state.readFrom(req.s.minq)
 }
 
 // GetState returns the current connection of the connection.
@@ -190,15 +190,15 @@ func (c *Connection) Close( /* TODO application error code */ ) error {
 }
 
 // CreateBidirectionalStream creates a new stream.
-func (c *Connection) CreateStream() *Stream {
-	result := make(chan *Stream)
+func (c *Connection) CreateStream() minq.Stream {
+	result := make(chan minq.Stream)
 	c.ops.createBidiStream <- &createBidiStreamRequest{c, result}
 	return <-result
 }
 
 // CreateUnidirectionalStream creates a new stream.
-func (c *Connection) CreateUnidirectionalStream() *SendStream {
-	result := make(chan *SendStream)
+func (c *Connection) CreateUnidirectionalStream() minq.SendStream {
+	result := make(chan minq.SendStream)
 	c.ops.createUniStream <- &createUniStreamRequest{c, result}
 	return <-result
 }

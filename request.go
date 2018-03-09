@@ -37,8 +37,11 @@ func (req *ClientRequest) Write(p []byte) (int, error) {
 
 func (req *ClientRequest) Close(trailers []hc.HeaderField) error {
 	if trailers != nil {
-		err := req.encoder.WriteHeaderBlock(req.headersStream, req.requestStream,
-			req.outstanding.add(req.requestId))
+		trailerWriter := writerTo(func(w io.Writer) (int64, error) {
+			return req.encoder.WriteHeaderBlock(req.headersStream, req.requestStream,
+				req.outstanding.add(req.requestId))
+		})
+		err := NewFrameWriter(req.requestStream).WriteFrame(frameHeaders, 0, trailerWriter)
 		if err != nil {
 			return err
 		}

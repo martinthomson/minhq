@@ -1,0 +1,204 @@
+package mw
+
+import (
+	"net"
+	"time"
+
+	"github.com/ekr/minq"
+)
+
+// Packet represents a packet.  It has addresses and a payload.
+type Packet struct {
+	RemoteAddr *net.UDPAddr
+	LocalAddr  *net.UDPAddr
+	Data       []byte
+}
+
+type readState struct {
+	readable bool
+	reader   *ioRequest
+}
+
+func (state *readState) readFrom(minqs minq.RecvStream) {
+	if state.reader == nil || !state.readable {
+		return // noop
+	}
+	n, err := minqs.Read(state.reader.p)
+	if err == minq.ErrorWouldBlock {
+		state.readable = false
+		return // That blocked.  Leave the reader in place.
+	}
+	state.reader.result <- &ioResult{n, err}
+	state.reader = nil
+}
+
+// Connection is an async wrapper around minq.Connection
+type Connection struct {
+	minq *minq.Connection
+
+	// Connected produces this connection when the connection is established.
+	Connected <-chan *Connection
+	connected chan<- *Connection
+	closed    chan struct{}
+	// RemoteStreams is an unbuffered channel of streams created by a peer.
+	RemoteStreams <-chan *Stream
+	remoteStreams chan<- *Stream
+	// RemoteRecvStreams is an unbuffered channel of unidirectional streams created by a peer.
+	RemoteRecvStreams <-chan *RecvStream
+	remoteRecvStreams chan<- *RecvStream
+	// IncomingPackets are packets that arrive at the connection.
+	IncomingPackets chan<- *Packet
+	incomingPackets <-chan *Packet
+
+	readState map[minq.RecvStream]*readState
+
+	ops *connectionOperations
+}
+
+func newConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
+	connected := make(chan *Connection)
+	streams := make(chan *Stream)
+	recvStreams := make(chan *RecvStream)
+	c := &Connection{
+		minq:              mc,
+		Connected:         connected,
+		connected:         connected,
+		closed:            make(chan struct{}),
+		RemoteStreams:     streams,
+		remoteStreams:     streams,
+		RemoteRecvStreams: recvStreams,
+		remoteRecvStreams: recvStreams,
+
+		readState: make(map[minq.RecvStream]*readState),
+		ops:       ops,
+	}
+	mc.SetHandler(c)
+	return c
+}
+
+// NewConnction makes a new client connection.
+func NewConnection(mc *minq.Connection) *Connection {
+	c := newConnection(mc, newConnectionOperations())
+	// Only clients need to handle packets directly. Server handles routing of
+	// incoming packets for servers.
+	incoming := make(chan *Packet)
+	c.IncomingPackets = incoming
+	c.incomingPackets = incoming
+	go c.service()
+	return c
+}
+
+// newServerConnection is used by Server to make connections. The resulting
+// connection doesn't accept incoming packets from Connection.IncomingPackets
+// (that is set to nil), because the expectation is that packets will be passed
+// to the server.
+func newServerConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
+	if mc.Role() != minq.RoleServer {
+		panic("minq.Server spat out a client")
+	}
+	return newConnection(mc, ops)
+}
+
+// Service is intended to be run as a goroutine. This is the only goroutine that
+// can touch the underlying functions on minq objects.
+func (c *Connection) service() {
+	defer c.cleanup()
+
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		switch c.minq.GetState() {
+		case minq.StateClosed, minq.StateError:
+			return
+		}
+		select {
+		case p := <-c.incomingPackets:
+			_ = c.minq.Input(p.Data)
+		case <-ticker.C:
+			c.minq.CheckTimer()
+		default:
+			c.ops.Select()
+		}
+	}
+}
+
+func (c *Connection) cleanup() {
+	c.ops.Close()
+	close(c.connected)
+	close(c.remoteStreams)
+	close(c.closed)
+}
+
+// StateChanged is required by the minq.ConnectionHandler interface.
+func (c *Connection) StateChanged(s minq.State) {
+
+	switch s {
+	case minq.StateEstablished:
+		c.connected <- c
+	case minq.StateClosed, minq.StateError:
+		close(c.closed)
+	}
+}
+
+// NewStream is required by the minq.ConnectionHandler interface.
+func (c *Connection) NewStream(s minq.Stream) {
+	c.remoteStreams <- &Stream{c, s.Id(), s, s}
+}
+
+// NewRecvStream is required by the minq.ConnectionHandler interface.
+func (c *Connection) NewRecvStream(s minq.RecvStream) {
+	c.remoteRecvStreams <- &RecvStream{Stream{c, s.Id(), nil, s}}
+}
+
+// StreamReadable is required by the minq.ConnectionHandler interface.
+func (c *Connection) StreamReadable(s minq.RecvStream) {
+	state := c.readState[s]
+	if state == nil {
+		state = &readState{true, nil}
+		c.readState[s] = state
+	} else {
+		state.readable = true
+	}
+	state.readFrom(s)
+}
+
+func (c *Connection) handleReadRequest(req *ioRequest) {
+	state := c.readState[req.s.recv]
+	if state == nil {
+		state = &readState{false, req}
+		c.readState[req.s.recv] = state
+	} else if state.reader == nil {
+		state.reader = req
+	} else {
+		panic("Concurrent reads from the same stream")
+	}
+	state.readFrom(req.s.recv)
+}
+
+// GetState returns the current connection of the connection.
+func (c *Connection) GetState() minq.State {
+	state := make(chan minq.State)
+	c.ops.getState <- &getStateRequest{c, state}
+	return <-state
+}
+
+// Close the connection.
+func (c *Connection) Close( /* TODO application error code */ ) error {
+	c.ops.closeConnection <- &closeConnectionRequest{c}
+	<-c.closed
+	return nil
+}
+
+// CreateBidirectionalStream creates a new stream.
+func (c *Connection) CreateStream() *Stream {
+	result := make(chan *Stream)
+	c.ops.createBidiStream <- &createBidiStreamRequest{c, result}
+	return <-result
+}
+
+// CreateUnidirectionalStream creates a new stream.
+func (c *Connection) CreateUnidirectionalStream() *SendStream {
+	result := make(chan *SendStream)
+	c.ops.createUniStream <- &createUniStreamRequest{c, result}
+	return <-result
+}

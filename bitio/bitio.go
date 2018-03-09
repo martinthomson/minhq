@@ -12,11 +12,13 @@ type BitWriter interface {
 	WriteBit(count byte) error
 	WriteBits(value uint64, count byte) error
 	Pad(pad byte) error
+	Written() int64
 }
 type bitWriter struct {
 	writer    io.Writer
 	saved     uint64
 	savedBits byte
+	written   int64
 }
 
 // NewBitWriter makes a new BitWriter.
@@ -25,13 +27,21 @@ func NewBitWriter(writer io.Writer) BitWriter {
 	if ok {
 		return bw
 	}
-	return &bitWriter{writer, 0, 0}
+	return &bitWriter{writer, 0, 0, 0}
+}
+
+func (bw *bitWriter) Written() int64 {
+	if bw.savedBits > 0 {
+		panic("Checking written with partially written bytes")
+	}
+	return bw.written
 }
 
 // Writes out a byte to the underlying writer.
 func (bw *bitWriter) writeByteInternal(c byte) error {
 	byteWriter, ok := bw.writer.(io.ByteWriter)
 	if ok {
+		bw.written++
 		return byteWriter.WriteByte(c)
 	}
 	n, err := bw.writer.Write([]byte{c})
@@ -41,6 +51,7 @@ func (bw *bitWriter) writeByteInternal(c byte) error {
 	if n == 0 {
 		return io.ErrShortWrite
 	}
+	bw.written += int64(n)
 	return nil
 }
 
@@ -106,7 +117,9 @@ func (bw *bitWriter) WriteByte(c byte) error {
 // Write so that we can claim to implement the io.Writer interface.
 func (bw *bitWriter) Write(p []byte) (int, error) {
 	if bw.savedBits == 0 {
-		return bw.writer.Write(p)
+		n, err := bw.writer.Write(p)
+		bw.written += int64(n)
+		return n, err
 	}
 	for i, b := range p {
 		err := bw.WriteByte(b)

@@ -2,6 +2,7 @@ package minhq
 
 import (
 	"errors"
+	"io"
 	"net/url"
 	"sync/atomic"
 
@@ -37,6 +38,12 @@ func (c *ClientConnection) nextRequestId() *requestId {
 	return &requestId{atomic.AddUint64(&c.requestId, 1), 0}
 }
 
+type writerTo func(w io.Writer) (n int64, err error)
+
+func (wt writerTo) WriteTo(w io.Writer) (n int64, err error) {
+	return wt(w)
+}
+
 func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderField) (*ClientRequest, error) {
 	u, err := url.Parse(target)
 	if err != nil {
@@ -64,10 +71,12 @@ func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderFiel
 	if err != nil {
 		return nil, err
 	}
-	err = c.encoder.WriteHeaderBlock(c.controlStream, s, requestId)
-	if err != nil {
-		return nil, err
-	}
+
+	headerWriter := writerTo(func(w io.Writer) (n int64, err error) {
+		return c.encoder.WriteHeaderBlock(w, s, requestId)
+	})
+	writer.WriteFrame(frameHeaders, 0, headerWriter)
+
 	responseChannel := make(chan *ClientResponse)
 	req := &ClientRequest{
 		Headers:   allHeaders,

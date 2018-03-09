@@ -372,11 +372,11 @@ func (encoder *QcramEncoder) writeLiteral(writer *Writer, state *qcramWriterStat
 	return encoder.writeNameValue(writer, h, state.nameMatches[i], 4, state.largestBase)
 }
 
-func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcramWriterState) error {
+func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcramWriterState) (int64, error) {
 	w := NewWriter(headerWriter)
 	err := w.WriteInt(uint64(state.largestBase), 8)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	// Make sure that we don't read over writes.
@@ -391,10 +391,10 @@ func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcr
 			err = encoder.writeLiteral(w, state, i)
 		}
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
-	return nil
+	return w.Written(), nil
 }
 
 // WriteHeaderBlock writes out a header block.  controlWriter is the control stream writer
@@ -403,17 +403,17 @@ func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcr
 // unacknowledged. Using the same token twice without first acknowledging it can
 // result in errors.
 func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWriter io.Writer,
-	token interface{}, headers ...HeaderField) error {
+	token interface{}, headers ...HeaderField) (int64, error) {
 	err := validatePseudoHeaders(headers)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	var state qcramWriterState
 	state.init(headers, token)
 	err = encoder.writeTableChanges(controlWriter, &state)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	return encoder.writeHeaderBlock(headerWriter, &state)

@@ -34,15 +34,14 @@ func TestQcramEncoder(t *testing.T) {
 
 		var controlBuf bytes.Buffer
 		var headerBuf bytes.Buffer
-		err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, tc.headers...)
+		n, err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, tc.headers...)
 		assert.Nil(t, err)
+		assert.Equal(t, n, int64(headerBuf.Len()))
 
 		expectedControl, err := hex.DecodeString(tc.qcramControl)
 		assert.Nil(t, err)
 		if len(expectedControl) == 0 {
-			// In a gross violation of expectations resulting from go's insistence on not
-			// having constructors, controlBuf.Bytes() returns nil if it hasn't been
-			// written to yet.
+			// controlBuf.Bytes() returns nil if it hasn't been written to yet. meh.
 			assert.Equal(t, 0, controlBuf.Len())
 		} else {
 			assert.Equal(t, expectedControl, controlBuf.Bytes())
@@ -66,10 +65,11 @@ func TestQcramEncoder(t *testing.T) {
 func setupEncoder(t *testing.T, encoder *hc.QcramEncoder) {
 	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "setup",
+	n, err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "setup",
 		hc.HeaderField{Name: "name1", Value: "value1"},
 		hc.HeaderField{Name: "name2", Value: "value2"})
 	assert.Nil(t, err)
+	assert.Equal(t, n, int64(headerBuf.Len()))
 
 	// We should see inserts here.
 	expectedControl, err := hex.DecodeString("4084a874943f85ee3a2d287f4084a874945f85ee3a2d28bf")
@@ -93,10 +93,11 @@ func assertQcramTableFull(t *testing.T, encoder *hc.QcramEncoder) {
 	var headerBuf bytes.Buffer
 
 	token := "full"
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token,
+	n, err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token,
 		hc.HeaderField{Name: "namef", Value: "valuef"})
 	assert.Nil(t, err)
 	assert.Equal(t, 0, controlBuf.Len())
+	assert.Equal(t, n, int64(headerBuf.Len()))
 
 	expectedHeader, err := hex.DecodeString("000084a874965f85ee3a2d2cbf")
 	assert.Nil(t, err)
@@ -112,10 +113,11 @@ func TestQcramDuplicate(t *testing.T) {
 
 	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	n, err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
 		hc.HeaderField{Name: "name0", Value: "value0"},
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
+	assert.Equal(t, n, int64(headerBuf.Len()))
 
 	// This should include a duplication (that's the 3f21 on the end).
 	expectedControl, err := hex.DecodeString("4084a874941f85ee3a2d283f3f21")
@@ -146,10 +148,11 @@ func TestQcramDuplicateLiteral(t *testing.T) {
 
 	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	n, err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
 		hc.HeaderField{Name: "name0", Value: "value0"},
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
+	assert.Equal(t, n, int64(headerBuf.Len()))
 
 	// name0:value0 can be added, but there isn't enough room to duplicate
 	// name1:value1.
@@ -181,9 +184,10 @@ func TestQcramNameReference(t *testing.T) {
 
 	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	n, err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
+	assert.Equal(t, n, int64(headerBuf.Len()))
 
 	// 7f00 is an insert with a name reference.
 	expectedControl, err := hex.DecodeString("7f0085ee3a2d2bff")
@@ -214,9 +218,10 @@ func TestNotIndexedNameReference(t *testing.T) {
 	encoder.SetIndexPreference("name1", false)
 	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	n, err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
+	assert.Equal(t, n, int64(headerBuf.Len()))
 
 	assert.Equal(t, 0, controlBuf.Len())
 

@@ -104,37 +104,6 @@ func (c *Connection) FatalError(e HttpError) {
 	c.Close()
 }
 
-type settingsWriter struct {
-	config *Config
-}
-
-// WriteTo writes out just one integer setting for the moment.
-func (sw *settingsWriter) WriteTo(w io.Writer) (int64, error) {
-	fw := NewFrameWriter(w)
-	return sw.writeIntSetting(fw, settingTableSize,
-		uint64(sw.config.DecoderTableCapacity))
-}
-
-func (sw *settingsWriter) writeIntSetting(fw FrameWriter, s settingType, v uint64) (int64, error) {
-	var buf bytes.Buffer
-	tmpfw := NewFrameWriter(&buf)
-	_, err := tmpfw.WriteVarint(v)
-	if err != nil {
-		return 0, err
-	}
-
-	err = fw.WriteBits(uint64(s), 16)
-	written := int64(2)
-	n64, err := fw.WriteVarint(uint64(buf.Len()))
-	written += n64
-	if err != nil {
-		return written, err
-	}
-	n64, err = io.Copy(fw, &buf)
-	written += n64
-	return written, err
-}
-
 func (c *Connection) checkExtraData(r io.Reader) error {
 	var p [1]byte
 	n, err := r.Read(p[:])
@@ -158,40 +127,19 @@ func (c *Connection) handlePriority(f byte, r io.Reader) error {
 	return nil
 }
 
-func (c *Connection) readSettings(r FrameReader) error {
-	for {
-		s, err := r.ReadBits(16)
-		if err != nil {
-			return err
-		}
-		len, err := r.ReadVarint()
-		if err != nil {
-			return err
-		}
-		lr := r.Limited(len)
-		switch settingType(s) {
-		case settingTableSize:
-			n, err := lr.ReadVarint()
-			if err != nil {
-				return err
-			}
-			c.encoder.SetCapacity(hc.TableCapacity(n))
-		default:
-			_, err = io.Copy(ioutil.Discard, lr)
-		}
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // This spits out a SETTINGS frame and then sits there reading the control
 // stream until it encounters an error.
 func (c *Connection) serviceControlStream() {
 	reader := NewFrameReader(c.controlStream)
 	writer := NewFrameWriter(c.controlStream)
-	err := writer.WriteFrame(frameSettings, 0, &settingsWriter{&c.config})
+	var buf bytes.Buffer
+	sw := settingsWriter{&c.config}
+	n, err := sw.WriteTo(&buf)
+	if err != nil || n != int64(buf.Len()) {
+		c.FatalError(ErrWtf)
+		return
+	}
+	err = writer.WriteFrame(frameSettings, 0, buf.Bytes())
 	if err != nil {
 		c.FatalError(ErrWtf)
 		return
@@ -208,7 +156,8 @@ func (c *Connection) serviceControlStream() {
 		return
 	}
 
-	err = c.readSettings(r)
+	sr := settingsReader{c}
+	err = sr.readSettings(r)
 	if err != nil {
 		c.FatalError(ErrWtf)
 		return

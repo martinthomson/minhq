@@ -40,7 +40,7 @@ func TestVarintReadLonger(t *testing.T) {
 		{1, []byte{0x80, 0, 0, 1}},
 		{63, []byte{0xc0, 0, 0, 0, 0, 0, 0, 63}},
 		{64, []byte{0x80, 0, 0, 64}},
-		{16383, []byte{0x80, 0, 0xff, 0xff}},
+		{16383, []byte{0x80, 0, 0x3f, 0xff}},
 		{16384, []byte{0xc0, 0, 0, 0, 0, 0, 0x40, 0}},
 		{1<<30 - 1, []byte{0xc0, 0, 0, 0, 0x3f, 0xff, 0xff, 0xff}},
 	}

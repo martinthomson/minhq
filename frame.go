@@ -22,13 +22,6 @@ const (
 	frameMaxPushId   = frameType(13)
 )
 
-type settingType uint16
-
-const (
-	settingTableSize         = settingType(1)
-	settingMaxHeaderListSize = settingType(6) // TODO implement
-)
-
 // ErrUnsupportedFrame signals that an unsupported frame was received.
 var ErrUnsupportedFrame = errors.New("Unsupported frame type received")
 
@@ -82,7 +75,12 @@ func (fr *frameReader) Limited(n uint64) FrameReader {
 type FrameWriter interface {
 	bitio.BitWriter
 	WriteVarint(v uint64) (int64, error)
-	WriteFrame(t frameType, f byte, wt io.WriterTo) error
+	WriteFrame(t frameType, f byte, p []byte) error
+}
+
+type FrameWriteCloser interface {
+	FrameWriter
+	io.Closer
 }
 
 type frameWriter struct {
@@ -119,13 +117,8 @@ func (fw *frameWriter) WriteVarint(v uint64) (int64, error) {
 	return int64(n), nil
 }
 
-func (fw *frameWriter) WriteFrame(t frameType, f byte, wt io.WriterTo) error {
-	var buf bytes.Buffer
-	n, err := wt.WriteTo(&buf)
-	if err != nil || n != int64(buf.Len()) {
-		return err
-	}
-	_, err = fw.WriteVarint(uint64(n))
+func (fw *frameWriter) WriteFrame(t frameType, f byte, p []byte) error {
+	_, err := fw.WriteVarint(uint64(len(p)))
 	if err != nil {
 		return err
 	}
@@ -137,6 +130,6 @@ func (fw *frameWriter) WriteFrame(t frameType, f byte, wt io.WriterTo) error {
 	if err != nil {
 		return err
 	}
-	_, err = io.Copy(fw, &buf)
+	_, err = io.Copy(fw, bytes.NewReader(p))
 	return err
 }

@@ -1,8 +1,8 @@
 package minhq
 
 import (
+	"bytes"
 	"errors"
-	"io"
 	"net/url"
 	"sync/atomic"
 
@@ -38,10 +38,17 @@ func (c *ClientConnection) nextRequestId() *requestId {
 	return &requestId{atomic.AddUint64(&c.requestId, 1), 0}
 }
 
-type writerTo func(w io.Writer) (n int64, err error)
-
-func (wt writerTo) WriteTo(w io.Writer) (n int64, err error) {
-	return wt(w)
+func writeHeaderBlock(encoder *hc.QcramEncoder, headersStream FrameWriter, requestStream FrameWriter, token interface{}) error {
+	var controlBuf, headerBuf bytes.Buffer
+	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token)
+	if err != nil {
+		return err
+	}
+	err = headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
+	if err != nil {
+		return err
+	}
+	return requestStream.WriteFrame(frameHeaders, 0, headerBuf.Bytes())
 }
 
 func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderField) (*ClientRequest, error) {
@@ -66,16 +73,15 @@ func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderFiel
 
 	requestId := c.nextRequestId()
 	s := newStream(c.CreateStream())
-	writer := NewFrameWriter(s)
-	_, err = writer.WriteVarint(requestId.id)
+	_, err = s.WriteVarint(requestId.id)
 	if err != nil {
 		return nil, err
 	}
 
-	headerWriter := writerTo(func(w io.Writer) (n int64, err error) {
-		return c.encoder.WriteHeaderBlock(w, s, requestId)
-	})
-	writer.WriteFrame(frameHeaders, 0, headerWriter)
+	err = writeHeaderBlock(c.encoder, c.headersStream, s, requestId)
+	if err != nil {
+		return nil, err
+	}
 
 	responseChannel := make(chan *ClientResponse)
 	req := &ClientRequest{
@@ -83,9 +89,10 @@ func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderFiel
 		Response:  responseChannel,
 		requestId: requestId,
 
+		requestStream: s,
+
 		encoder:       c.encoder,
 		headersStream: c.headersStream,
-		requestStream: s,
 		outstanding:   &c.outstanding,
 	}
 	go req.readResponse(s, c, responseChannel)

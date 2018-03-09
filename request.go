@@ -2,6 +2,7 @@ package minhq
 
 import (
 	"io"
+	"io/ioutil"
 
 	"github.com/martinthomson/minhq/hc"
 )
@@ -23,11 +24,11 @@ type ClientRequest struct {
 	Response  <-chan *ClientResponse
 	requestId *requestId
 
-	requestStream io.WriteCloser
+	requestStream FrameWriteCloser
 
 	// This stuff is all needed for trailers (ugh).
 	encoder       *hc.QcramEncoder
-	headersStream io.Writer
+	headersStream FrameWriter
 	outstanding   *outstandingHeaders
 }
 
@@ -37,11 +38,7 @@ func (req *ClientRequest) Write(p []byte) (int, error) {
 
 func (req *ClientRequest) Close(trailers []hc.HeaderField) error {
 	if trailers != nil {
-		trailerWriter := writerTo(func(w io.Writer) (int64, error) {
-			return req.encoder.WriteHeaderBlock(req.headersStream, req.requestStream,
-				req.outstanding.add(req.requestId))
-		})
-		err := NewFrameWriter(req.requestStream).WriteFrame(frameHeaders, 0, trailerWriter)
+		err := writeHeaderBlock(req.encoder, req.headersStream, req.requestStream, req.outstanding.add(req.requestId))
 		if err != nil {
 			return err
 		}
@@ -50,8 +47,9 @@ func (req *ClientRequest) Close(trailers []hc.HeaderField) error {
 }
 
 func (req *ClientRequest) handlePushPromise(f byte, r io.Reader) error {
-	// TODO something useful
-	return nil
+	// TODO something more than a straight discard
+	_, err := io.Copy(ioutil.Discard, r)
+	return err
 }
 
 func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
@@ -111,6 +109,7 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		}
 	}
 	if err == io.EOF {
+		close(trailers)
 		close(data)
 	} else if err != nil {
 		c.FatalError(ErrWtf)

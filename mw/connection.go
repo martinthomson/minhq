@@ -196,8 +196,8 @@ func (c *Connection) CreateStream() minq.Stream {
 	return <-result
 }
 
-// CreateUnidirectionalStream creates a new stream.
-func (c *Connection) CreateUnidirectionalStream() minq.SendStream {
+// CreateSendStream creates a new stream.
+func (c *Connection) CreateSendStream() minq.SendStream {
 	result := make(chan minq.SendStream)
 	c.ops.createUniStream <- &createUniStreamRequest{c, result}
 	return <-result

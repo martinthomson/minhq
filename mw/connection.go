@@ -48,14 +48,12 @@ type Connection struct {
 	remoteRecvStreams chan<- minq.RecvStream
 	// IncomingPackets are packets that arrive at the connection.
 	IncomingPackets chan<- *Packet
-	incomingPackets <-chan *Packet
 
 	readState map[minq.RecvStream]*readState
-
-	ops *connectionOperations
+	ops       connectionOperations
 }
 
-func newConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
+func newConnection(mc *minq.Connection, ops connectionOperations) *Connection {
 	connected := make(chan *Connection)
 	streams := make(chan minq.Stream)
 	recvStreams := make(chan minq.RecvStream)
@@ -78,12 +76,13 @@ func newConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
 
 // NewConnction makes a new client connection.
 func NewConnection(mc *minq.Connection) *Connection {
-	c := newConnection(mc, newConnectionOperations())
+	ops := connectionOperations(make(chan interface{}))
+	c := newConnection(mc, ops)
 	// Only clients need to handle packets directly. Server handles routing of
 	// incoming packets for servers.
 	incoming := make(chan *Packet)
 	c.IncomingPackets = incoming
-	c.incomingPackets = incoming
+	go ops.ReadPackets(incoming)
 	go c.service()
 	return c
 }
@@ -92,7 +91,7 @@ func NewConnection(mc *minq.Connection) *Connection {
 // connection doesn't accept incoming packets from Connection.IncomingPackets
 // (that is set to nil), because the expectation is that packets will be passed
 // to the server.
-func newServerConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
+func newServerConnection(mc *minq.Connection, ops connectionOperations) *Connection {
 	if mc.Role() != minq.RoleServer {
 		panic("minq.Server spat out a client")
 	}
@@ -112,12 +111,12 @@ func (c *Connection) service() {
 			return
 		}
 		select {
-		case p := <-c.incomingPackets:
-			_ = c.minq.Input(p.Data)
+		case op := <-c.ops:
+			c.ops.Handle(op, func(p *Packet) {
+				_ = c.minq.Input(p.Data)
+			})
 		case <-ticker.C:
 			c.minq.CheckTimer()
-		default:
-			c.ops.Select()
 		}
 	}
 }
@@ -126,7 +125,6 @@ func (c *Connection) cleanup() {
 	c.ops.Close()
 	close(c.connected)
 	close(c.remoteStreams)
-	close(c.closed)
 }
 
 // StateChanged is required by the minq.ConnectionHandler interface.
@@ -178,13 +176,13 @@ func (c *Connection) handleReadRequest(req *readRequest) {
 // GetState returns the current connection of the connection.
 func (c *Connection) GetState() minq.State {
 	state := make(chan minq.State)
-	c.ops.getState <- &getStateRequest{c, state}
+	c.ops <- &getStateRequest{c, state}
 	return <-state
 }
 
 // Close the connection.
 func (c *Connection) Close( /* TODO application error code */ ) error {
-	c.ops.closeConnection <- &closeConnectionRequest{c}
+	c.ops <- &closeConnectionRequest{c}
 	<-c.closed
 	return nil
 }
@@ -192,13 +190,13 @@ func (c *Connection) Close( /* TODO application error code */ ) error {
 // CreateBidirectionalStream creates a new stream.
 func (c *Connection) CreateStream() minq.Stream {
 	result := make(chan minq.Stream)
-	c.ops.createBidiStream <- &createBidiStreamRequest{c, result}
+	c.ops <- &createStreamRequest{c, result}
 	return <-result
 }
 
 // CreateSendStream creates a new stream.
 func (c *Connection) CreateSendStream() minq.SendStream {
 	result := make(chan minq.SendStream)
-	c.ops.createUniStream <- &createUniStreamRequest{c, result}
+	c.ops <- &createSendStreamRequest{c, result}
 	return <-result
 }

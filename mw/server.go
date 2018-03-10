@@ -15,13 +15,13 @@ type Server struct {
 	// IncomingPackets are incoming packets.
 	IncomingPackets chan<- *Packet
 
-	ops      *connectionOperations
+	ops      connectionOperations
 	shutdown chan chan<- struct{}
 }
 
 type serverHandler struct {
 	connections chan<- *Connection
-	ops         *connectionOperations
+	ops         connectionOperations
 }
 
 func (sh *serverHandler) NewConnection(mc *minq.Connection) {
@@ -33,36 +33,38 @@ func (sh *serverHandler) NewConnection(mc *minq.Connection) {
 
 func RunServer(ms *minq.Server) *Server {
 	connections := make(chan *Connection)
-	incomingPackets := make(chan *Packet)
+	incoming := make(chan *Packet)
 	s := &Server{
 		s:               ms,
 		Connections:     connections,
-		IncomingPackets: incomingPackets,
-		ops:             newConnectionOperations(),
+		IncomingPackets: incoming,
+		ops:             connectionOperations(make(chan interface{})),
 		shutdown:        make(chan chan<- struct{}),
 	}
 	ms.SetHandler(&serverHandler{connections, s.ops})
-	go s.service(incomingPackets)
+	go s.ops.ReadPackets(incoming)
+	go s.service()
 	return s
 }
 
-func (s *Server) service(incomingPackets <-chan *Packet) {
+func (s *Server) service() {
 	defer s.cleanup()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
 
 	for {
 		select {
-		case p := <-incomingPackets:
-			_, _ = s.s.Input(p.RemoteAddr, p.Data)
-			// TODO log something
+		case op := <-s.ops:
+			s.ops.Handle(op, func(p *Packet) {
+				_, _ = s.s.Input(p.RemoteAddr, p.Data)
+			})
+
+		case <-ticker.C:
+			s.s.CheckTimer()
+
 		case done := <-s.shutdown:
 			close(done)
 			return
-		case <-ticker.C:
-			s.s.CheckTimer()
-		default:
-			s.ops.Select()
 		}
 	}
 }

@@ -24,12 +24,12 @@ type getRecvStateRequest struct {
 	result chan<- minq.RecvStreamState
 }
 
-type createBidiStreamRequest struct {
+type createStreamRequest struct {
 	c      *Connection
 	result chan<- minq.Stream
 }
 
-type createUniStreamRequest struct {
+type createSendStreamRequest struct {
 	c      *Connection
 	result chan<- minq.SendStream
 }
@@ -58,7 +58,7 @@ type readRequest struct {
 type resetRequest struct {
 	c      *Connection
 	s      *SendStream
-	err    minq.ErrorCode // TODO application error code
+	code   minq.ErrorCode // TODO application error code
 	result chan<- error
 }
 
@@ -80,144 +80,133 @@ type closeConnectionRequest struct {
 	// TODO error code.
 }
 
-type connectionOperations struct {
-	getState         chan *getStateRequest
-	createBidiStream chan *createBidiStreamRequest
-	createUniStream  chan *createUniStreamRequest
-	getSendState     chan *getSendStateRequest
-	write            chan *writeRequest
-	reset            chan *resetRequest
-	closeStream      chan *closeStreamRequest
-	getRecvState     chan *getRecvStateRequest
-	read             chan *readRequest
-	stopSending      chan *stopRequest
-	closeConnection  chan *closeConnectionRequest
-}
+type connectionOperations chan interface{}
 
-func newConnectionOperations() *connectionOperations {
-	return &connectionOperations{
-		getState:         make(chan *getStateRequest),
-		createBidiStream: make(chan *createBidiStreamRequest),
-		createUniStream:  make(chan *createUniStreamRequest),
-		getSendState:     make(chan *getSendStateRequest),
-		write:            make(chan *writeRequest),
-		reset:            make(chan *resetRequest),
-		closeStream:      make(chan *closeStreamRequest),
-		getRecvState:     make(chan *getRecvStateRequest),
-		read:             make(chan *readRequest),
-		stopSending:      make(chan *stopRequest),
-		closeConnection:  make(chan *closeConnectionRequest),
+// ReadPackets is intended to handle a channel of incoming packets.  Intended to be run as a goroutine.
+func (ops connectionOperations) ReadPackets(incoming chan *Packet) {
+	for {
+		p := <-incoming
+		if p == nil {
+			break
+		}
+		ops <- p
 	}
 }
 
 // Select polls the set of operations and runs any necessary operations.
-func (ops *connectionOperations) Select() {
-	select {
-	case getStateReq := <-ops.getState:
-		getStateReq.result <- getStateReq.c.GetState()
+func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet)) {
+	switch op := v.(type) {
+	case *getStateRequest:
+		op.result <- op.c.GetState()
 
-	case closeConnectionReq := <-ops.closeConnection:
-		closeConnectionReq.c.minq.Close( /* TODO Application Close for minq */ )
+	case *closeConnectionRequest:
+		op.c.minq.Close( /* TODO Application Close for minq */ )
 
-	case createStreamReq := <-ops.createBidiStream:
-		c := createStreamReq.c
-		s := c.minq.CreateBidirectionalStream()
-		createStreamReq.result <- &Stream{SendStream{c, s}, RecvStream{c, s}}
+	case *createStreamRequest:
+		s := op.c.minq.CreateStream()
+		op.result <- &Stream{SendStream{op.c, s}, RecvStream{op.c, s}}
 
-	case createStreamReq := <-ops.createUniStream:
-		c := createStreamReq.c
-		s := c.minq.CreateUnidirectionalStream()
-		createStreamReq.result <- &SendStream{c, s}
+	case *createSendStreamRequest:
+		s := op.c.minq.CreateSendStream()
+		op.result <- &SendStream{op.c, s}
 
-	case sendStateReq := <-ops.getSendState:
-		sendStateReq.result <- sendStateReq.s.minq.SendState()
+	case *getSendStateRequest:
+		op.result <- op.s.minq.SendState()
 
-	case writeReq := <-ops.write:
-		n, err := writeReq.s.minq.Write(writeReq.p)
-		writeReq.result <- &ioResult{n, err}
+	case *writeRequest:
+		n, err := op.s.minq.Write(op.p)
+		op.result <- &ioResult{n, err}
 
-	case closeReq := <-ops.closeStream:
-		closeReq.s.minq.Close()
-		closeReq.result <- nil
+	case *closeStreamRequest:
+		op.s.minq.Close()
+		op.result <- nil
 
-	case resetReq := <-ops.reset:
-		resetReq.result <- resetReq.s.minq.Reset(resetReq.err)
+	case *resetRequest:
+		op.result <- op.s.minq.Reset(op.code)
 
-	case recvStateReq := <-ops.getRecvState:
-		recvStateReq.result <- recvStateReq.s.minq.RecvState()
+	case *getRecvStateRequest:
+		op.result <- op.s.minq.RecvState()
 
-	case readReq := <-ops.read:
-		readReq.c.handleReadRequest(readReq)
+	case *readRequest:
+		op.c.handleReadRequest(op)
 
-	case stopSendingReq := <-ops.stopSending:
+	case *stopRequest:
 
 		// Note that closing the channel shouldn't be necessary, but caution is
 		// always welcome in these matters.
-		c := stopSendingReq.c
-		s := stopSendingReq.s
-		state := c.readState[s.minq]
+		state := op.c.readState[op.s.minq]
 		if state != nil {
 			if state.reader != nil {
 				close(state.reader.result)
 			}
-			delete(c.readState, s.minq)
+			delete(op.c.readState, op.s.minq)
 		}
-		stopSendingReq.result <- s.StopSending(stopSendingReq.code)
+		op.result <- op.s.StopSending(op.code)
+
+	case *Packet:
+		packetHandler(op)
 
 	default:
-		// Do nothing
+		panic("unknown operation")
 	}
 }
 
-func (ops *connectionOperations) Close() error {
+func (ops connectionOperations) Close() error {
+	// Drain the channel so that  any outstanding operations won't hang.
 	for {
+		var operation interface{}
 		select {
-		case gs := <-ops.getState:
-			gs.result <- gs.c.minq.GetState()
-
-		case cs := <-ops.createBidiStream:
-			close(cs.result)
-
-		case cs := <-ops.createUniStream:
-			close(cs.result)
-
-		case ss := <-ops.getSendState:
-			ss.result <- ss.s.minq.SendState()
-
-		case w := <-ops.write:
-			w.result <- &ioResult{0, ErrConnectionClosed}
-
-		case rst := <-ops.reset:
-			rst.result <- ErrConnectionClosed
-
-		case cs := <-ops.closeStream:
-			cs.result <- nil
-
-		case rs := <-ops.getRecvState:
-			rs.result <- rs.s.minq.RecvState()
-
-		case r := <-ops.read:
-			r.result <- &ioResult{0, ErrConnectionClosed}
-
-		case ss := <-ops.stopSending:
-			ss.result <- nil
-
-		case <-ops.closeConnection:
-			// NOP
+		case v, ok := <-ops:
+			if !ok {
+				close(ops)
+				return nil
+			}
+			operation = v
 
 		default:
-			break
+			close(ops)
+			return nil
+		}
+
+		switch op := operation.(type) {
+		case *getStateRequest:
+			op.result <- op.c.minq.GetState()
+
+		case *closeConnectionRequest:
+			// NOP
+
+		case *createStreamRequest:
+			close(op.result)
+
+		case *createSendStreamRequest:
+			close(op.result)
+
+		case *getSendStateRequest:
+			op.result <- op.s.minq.SendState()
+
+		case *writeRequest:
+			op.result <- &ioResult{0, ErrConnectionClosed}
+
+		case *resetRequest:
+			op.result <- ErrConnectionClosed
+
+		case *closeStreamRequest:
+			op.result <- nil
+
+		case *getRecvStateRequest:
+			op.result <- op.s.minq.RecvState()
+
+		case *readRequest:
+			op.result <- &ioResult{0, ErrConnectionClosed}
+
+		case *stopRequest:
+			op.result <- nil
+
+		case *Packet:
+			// NOOP
+
+		default:
+			panic("unknown operation")
 		}
 	}
-
-	close(ops.getState)
-	close(ops.createBidiStream)
-	close(ops.createUniStream)
-	close(ops.read)
-	close(ops.write)
-	close(ops.reset)
-	close(ops.stopSending)
-	close(ops.closeStream)
-	close(ops.closeConnection)
-	return nil
 }

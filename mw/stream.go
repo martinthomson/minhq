@@ -25,7 +25,7 @@ func (s *SendStream) Id() uint64 {
 // SendState proxies a request for the current state.
 func (s *SendStream) SendState() minq.SendStreamState {
 	result := make(chan minq.SendStreamState)
-	s.c.ops.getSendState <- &getSendStateRequest{s, result}
+	s.c.ops <- &getSendStateRequest{s, result}
 	return <-result
 }
 
@@ -33,7 +33,7 @@ func (s *SendStream) SendState() minq.SendStreamState {
 func (s *SendStream) Write(p []byte) (int, error) {
 	result := make(chan *ioResult)
 	req := &writeRequest{ioRequest{s.c, p, result}, s}
-	s.c.ops.write <- req
+	s.c.ops <- req
 	resp := <-result
 	return resp.n, resp.err
 }
@@ -41,14 +41,14 @@ func (s *SendStream) Write(p []byte) (int, error) {
 // Reset kills a stream (outbound only).
 func (s *SendStream) Reset(err minq.ErrorCode) error {
 	result := make(chan error)
-	s.c.ops.reset <- &resetRequest{s.c, s, err, result}
+	s.c.ops <- &resetRequest{s.c, s, err, result}
 	return <-result
 }
 
 // Close implements io.Closer, but it only affects the write side (I think).
 func (s *SendStream) Close() error {
 	result := make(chan error)
-	s.c.ops.closeStream <- &closeStreamRequest{s.c, s, result}
+	s.c.ops <- &closeStreamRequest{s.c, s, result}
 	return <-result
 }
 
@@ -66,7 +66,7 @@ func (s *RecvStream) Id() uint64 {
 // RecvState proxies a request for the current state.
 func (s *RecvStream) RecvState() minq.RecvStreamState {
 	result := make(chan minq.RecvStreamState)
-	s.c.ops.getRecvState <- &getRecvStateRequest{s, result}
+	s.c.ops <- &getRecvStateRequest{s, result}
 	return <-result
 }
 
@@ -74,7 +74,7 @@ func (s *RecvStream) RecvState() minq.RecvStreamState {
 func (s *RecvStream) Read(p []byte) (int, error) {
 	result := make(chan *ioResult)
 	req := &readRequest{ioRequest{s.c, p, result}, s}
-	s.c.ops.read <- req
+	s.c.ops <- req
 	resp := <-result
 	return resp.n, resp.err
 }
@@ -82,7 +82,7 @@ func (s *RecvStream) Read(p []byte) (int, error) {
 // StopSending currently does nothing because minq doesn't support it.
 func (s *RecvStream) StopSending(code minq.ErrorCode) error {
 	result := make(chan error)
-	s.c.ops.stopSending <- &stopRequest{s.c, s, code, result}
+	s.c.ops <- &stopRequest{s.c, s, code, result}
 	return <-result
 }
 

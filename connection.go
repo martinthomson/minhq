@@ -11,9 +11,10 @@ import (
 	"github.com/martinthomson/minhq/mw"
 )
 
-type HttpError uint16
+// HTTPError is one of the QUIC/HTTP error codes defined.
+type HTTPError uint16
 
-func (e HttpError) String() string {
+func (e HTTPError) String() string {
 	switch e {
 	case 0:
 		return "STOPPING"
@@ -28,12 +29,18 @@ func (e HttpError) String() string {
 	}
 }
 
-var ErrWtf = HttpError(3)
-var ErrQuicWtf = minq.ErrorCode(0xa) // PROTOCOL_VIOLATION
-var ErrExtraData = errors.New("Extra data at the end of a frame")
-var ErrNonZeroFlags = errors.New("Frame flags were non-zero")
-var ErrInvalidFrame = errors.New("Invalid frame type for context")
+// These errors are commonly reported error codes.
+var (
+	ErrWtf = HTTPError(3)
+	// minq doesn't export ErrProtocolViolation, though it should.
+	ErrQuicWtf      = minq.ErrorCode(0xa)
+	ErrExtraData    = errors.New("Extra data at the end of a frame")
+	ErrNonZeroFlags = errors.New("Frame flags were non-zero")
+	ErrInvalidFrame = errors.New("Invalid frame type for context")
+)
 
+// Config contains connection-level configuration options, such as the intended
+// capacity of the header table.
 type Config struct {
 	DecoderTableCapacity hc.TableCapacity
 }
@@ -47,7 +54,7 @@ type outstandingHeaders struct {
 	outstanding map[uint64]*outstandingHeaderBlock
 }
 
-func (oh *outstandingHeaders) add(id *requestId) *requestId {
+func (oh *outstandingHeaders) add(id *requestID) *requestID {
 	o, ok := oh.outstanding[id.id]
 	if ok {
 		o.sent++
@@ -55,10 +62,10 @@ func (oh *outstandingHeaders) add(id *requestId) *requestId {
 		o = &outstandingHeaderBlock{1, 0}
 		oh.outstanding[id.id] = o
 	}
-	return &requestId{id.id, o.sent}
+	return &requestID{id.id, o.sent}
 }
 
-func (oh *outstandingHeaders) ack(id uint64) *requestId {
+func (oh *outstandingHeaders) ack(id uint64) *requestID {
 	o, ok := oh.outstanding[id]
 	if !ok {
 		return nil
@@ -67,14 +74,17 @@ func (oh *outstandingHeaders) ack(id uint64) *requestId {
 	if o.acknowledged == o.sent {
 		delete(oh.outstanding, id)
 	}
-	return &requestId{id, o.acknowledged}
+	return &requestID{id, o.acknowledged}
 }
 
+// FrameHandler is used by subclasses of connection to deal with frames that only they handle.
 type FrameHandler interface {
 	HandleFrame(frameType, byte, FrameReader) error
 }
 
-type Connection struct {
+// connection is an abstract wrapper around mw.Connection (a wrapper around
+// minq.Connection in turn).
+type connection struct {
 	config Config
 	mw.Connection
 
@@ -88,36 +98,25 @@ type Connection struct {
 	unknownFrameHandler FrameHandler
 }
 
-func (c *Connection) Init(fh FrameHandler) {
+// Init ensures that the connection is ready to go. It spawns a few goroutines
+// to handle the control streams.
+func (c *connection) Init(fh FrameHandler) {
 	c.unknownFrameHandler = fh
 
-	// TODO unidirectional
-	c.controlStream = newSendStream(c.CreateUnidirectionalStream())
-	c.headersStream = newSendStream(c.CreateUnidirectionalStream())
-	c.headerAckStream = newSendStream(c.CreateUnidirectionalStream())
-	go c.serviceControlStream()
-	go c.serviceHeadersStream()
-	go c.serviceHeaderAckStream()
+	c.controlStream = newSendStream(c.CreateSendStream())
+	c.headersStream = newSendStream(c.CreateSendStream())
+	c.headerAckStream = newSendStream(c.CreateSendStream())
+	go c.serviceControlStream(newRecvStream(<-c.RemoteRecvStreams))
+	go c.serviceHeadersStream(newRecvStream(<-c.RemoteRecvStreams))
+	go c.serviceHeaderAckStream(newRecvStream(<-c.RemoteRecvStreams))
 }
 
-func (c *Connection) FatalError(e HttpError) {
+// FatalError is a helper that passes on HTTP errors to the underlying connection.
+func (c *connection) FatalError(e HTTPError) {
 	c.Close()
 }
 
-func (c *Connection) checkExtraData(r io.Reader) error {
-	var p [1]byte
-	n, err := r.Read(p[:])
-	if err != nil && err != io.EOF {
-		c.FatalError(ErrWtf)
-		return err
-	}
-	if n > 0 {
-		return ErrExtraData
-	}
-	return nil
-}
-
-func (c *Connection) handlePriority(f byte, r io.Reader) error {
+func (c *connection) handlePriority(f byte, r io.Reader) error {
 	// TODO implement something useful
 	_, err := io.Copy(ioutil.Discard, r)
 	if err != nil {
@@ -129,7 +128,7 @@ func (c *Connection) handlePriority(f byte, r io.Reader) error {
 
 // This spits out a SETTINGS frame and then sits there reading the control
 // stream until it encounters an error.
-func (c *Connection) serviceControlStream() {
+func (c *connection) serviceControlStream(controlStream *recvStream) {
 	var buf bytes.Buffer
 	sw := settingsWriter{&c.config}
 	n, err := sw.WriteTo(&buf)
@@ -137,14 +136,13 @@ func (c *Connection) serviceControlStream() {
 		c.FatalError(ErrWtf)
 		return
 	}
-	err = c.controlStream.WriteFrame(frameSettings, 0, buf.Bytes())
+	_, err = c.controlStream.WriteFrame(frameSettings, 0, buf.Bytes())
 	if err != nil {
 		c.FatalError(ErrWtf)
 		return
 	}
 
-reader := <- c.remoteControlStream
-	t, f, r, err := reader.ReadFrame()
+	t, f, r, err := controlStream.ReadFrame()
 	if err != nil {
 		c.FatalError(ErrWtf)
 		return
@@ -163,7 +161,7 @@ reader := <- c.remoteControlStream
 	}
 
 	for {
-		t, f, r, err = reader.ReadFrame()
+		t, f, r, err = controlStream.ReadFrame()
 		if err != nil {
 			c.FatalError(ErrWtf)
 			return
@@ -181,26 +179,26 @@ reader := <- c.remoteControlStream
 	}
 }
 
-func (c *Connection) serviceHeadersStream() {
-	_ = c.decoder.ReadTableUpdates(c.headersStream)
+func (c *connection) serviceHeadersStream(headersStream *recvStream) {
+	_ = c.decoder.ReadTableUpdates(headersStream)
 	if c.GetState() != minq.StateClosed {
 		c.FatalError(ErrWtf)
 	}
 }
 
-func (c *Connection) serviceHeaderAckStream() {
+func (c *connection) serviceHeaderAckStream(headerAckStream *recvStream) {
 	for {
-		n, err := c.headerAckStream.ReadVarint()
+		n, err := headerAckStream.ReadVarint()
 		if err != nil {
 			c.FatalError(ErrWtf)
 			return
 		}
-		reqId := c.outstanding.ack(n)
-		if reqId == nil {
+		reqID := c.outstanding.ack(n)
+		if reqID == nil {
 			c.FatalError(ErrWtf)
 			return
 		}
 
-		c.encoder.Acknowledge(reqId)
+		c.encoder.Acknowledge(reqID)
 	}
 }

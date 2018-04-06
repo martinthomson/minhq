@@ -1,124 +1,98 @@
 package minhq
 
 import (
+	"bytes"
 	"io"
-	"io/ioutil"
 
 	"github.com/martinthomson/minhq/hc"
 )
 
-type requestId struct {
-	id    uint64
-	index uint16
+type incomingMessageFrameHandler func(frameType, byte, io.Reader) error
+
+// IncomingMessage is the common parts of inbound messages (requests for
+// servers, responses for clients).
+type IncomingMessage struct {
+	decoder *hc.QcramDecoder
+	Headers []hc.HeaderField
+	concatenatingReader
+	Trailers <-chan []hc.HeaderField
+	trailers chan<- []hc.HeaderField
 }
 
-// Request is a representation of a request. A Connection will return one of
-// these in response to a request to send a request. It is writable so that
-// requests with bodies can be sent. A channel indicates where responses can be
-// retrieved.
-//
-// To use this, make one using Connection.Fetch(). Write any body, then close
-// the request with any trailers.
-type ClientRequest struct {
-	Headers   []hc.HeaderField
-	Response  <-chan *ClientResponse
-	requestId *requestId
-
-	requestStream FrameWriteCloser
-
-	// This stuff is all needed for trailers (ugh).
-	encoder       *hc.QcramEncoder
-	headersStream FrameWriter
-	outstanding   *outstandingHeaders
-}
-
-func (req *ClientRequest) Write(p []byte) (int, error) {
-	return req.requestStream.Write(p)
-}
-
-func (req *ClientRequest) Close(trailers []hc.HeaderField) error {
-	if trailers != nil {
-		err := writeHeaderBlock(req.encoder, req.headersStream, req.requestStream, req.outstanding.add(req.requestId))
-		if err != nil {
-			return err
-		}
-	}
-	return req.requestStream.Close()
-}
-
-func (req *ClientRequest) handlePushPromise(f byte, r io.Reader) error {
-	// TODO something more than a straight discard
-	_, err := io.Copy(ioutil.Discard, r)
-	return err
-}
-
-func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
-	responseChannel chan<- *ClientResponse) {
-	t, f, r, err := s.ReadFrame()
-	if err != nil {
-		s.Reset(ErrQuicWtf)
-		return
-	}
-
-	headers, err := c.decoder.ReadHeaderBlock(r)
-	if err != nil {
-		c.FatalError(ErrWtf)
-		return
-	}
-
-	data := make(chan io.Reader)
+func newIncomingMessage(decoder *hc.QcramDecoder, headers []hc.HeaderField) IncomingMessage {
 	trailers := make(chan []hc.HeaderField)
-	responseChannel <- &ClientResponse{
+	return IncomingMessage{
+		decoder: decoder,
 		Headers: headers,
-		Request: req,
 		concatenatingReader: concatenatingReader{
 			current: nil,
-			pending: data,
+			pending: make(chan io.Reader),
 		},
 		Trailers: trailers,
+		trailers: trailers,
 	}
+}
 
+func (msg *IncomingMessage) read(s *stream, frameHandler incomingMessageFrameHandler) error {
 	done := false
-	for t, f, r, err = s.ReadFrame(); err == nil; {
+	var err error
+	for t, f, r, err := s.ReadFrame(); err == nil; {
 		if done {
-			// Can't receive any other frame after trailers.
-			c.FatalError(ErrWtf)
-			return
+			return ErrInvalidFrame
 		}
 
 		switch t {
 		case frameData:
-			data <- r
+			msg.concatenatingReader.Add(r)
 		case frameHeaders:
 			done = true
-			headers, err = c.decoder.ReadHeaderBlock(r)
+			headers, err := msg.decoder.ReadHeaderBlock(r)
 			if err != nil {
-				c.FatalError(ErrWtf)
-				return
+				return err
 			}
-			trailers <- headers
-			close(trailers)
-		case framePushPromise:
-			err := req.handlePushPromise(f, r)
-			if err != nil {
-				return
-			}
+			msg.trailers <- headers
+			close(msg.trailers)
 		default:
-			c.FatalError(ErrWtf)
-			return
+			err := frameHandler(t, f, r)
+			if err != nil {
+				return err
+			}
 		}
 	}
 	if err == io.EOF {
-		close(trailers)
-		close(data)
-	} else if err != nil {
-		c.FatalError(ErrWtf)
+		close(msg.trailers)
+		msg.concatenatingReader.Close()
+		return nil
 	}
+	return err
+}
+
+func writeHeaderBlock(encoder *hc.QcramEncoder, headersStream FrameWriter, requestStream FrameWriter, token interface{}) error {
+	var controlBuf, headerBuf bytes.Buffer
+	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token)
+	if err != nil {
+		return err
+	}
+	_, err = headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
+	if err != nil {
+		return err
+	}
+	_, err = requestStream.WriteFrame(frameHeaders, 0, headerBuf.Bytes())
+	return err
 }
 
 type concatenatingReader struct {
 	current io.Reader
-	pending <-chan io.Reader
+	pending chan io.Reader
+}
+
+func (cat *concatenatingReader) Add(r io.Reader) {
+	cat.pending <- r
+}
+
+func (cat *concatenatingReader) Close() error {
+	close(cat.pending)
+	return nil
 }
 
 func (cat *concatenatingReader) next() bool {
@@ -141,12 +115,4 @@ func (cat *concatenatingReader) Read(p []byte) (int, error) {
 		n, err = cat.current.Read(p)
 	}
 	return n, err
-}
-
-// ClientResponse includes all that a client needs to handle a response.
-type ClientResponse struct {
-	Headers []hc.HeaderField
-	Request *ClientRequest
-	concatenatingReader
-	Trailers <-chan []hc.HeaderField
 }

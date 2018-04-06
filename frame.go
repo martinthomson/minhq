@@ -19,7 +19,7 @@ const (
 	framePushPromise = frameType(5)
 	frameGoaway      = frameType(7)
 	frameHeaderAck   = frameType(8)
-	frameMaxPushId   = frameType(13)
+	frameMaxPushID   = frameType(13)
 )
 
 // ErrUnsupportedFrame signals that an unsupported frame was received.
@@ -28,21 +28,25 @@ var ErrUnsupportedFrame = errors.New("Unsupported frame type received")
 // ErrTooLarge signals that a value was too large.
 var ErrTooLarge = errors.New("Value too large for the field")
 
+// FrameReader wraps a reader with helper functions specific to HTTP/QUIC.
 type FrameReader interface {
 	bitio.BitReader
 	ReadVarint() (uint64, error)
 	ReadFrame() (frameType, byte, FrameReader, error)
 	Limited(n uint64) FrameReader
+	CheckForEOF() error
 }
 
 type frameReader struct {
 	bitio.BitReader
 }
 
+// NewFrameReader wraps the given io.Reader.
 func NewFrameReader(r io.Reader) FrameReader {
 	return &frameReader{bitio.NewBitReader(r)}
 }
 
+// ReadVarint reads a variable length integer.
 func (fr *frameReader) ReadVarint() (uint64, error) {
 	len, err := fr.ReadBits(2)
 	if err != nil {
@@ -51,6 +55,7 @@ func (fr *frameReader) ReadVarint() (uint64, error) {
 	return fr.ReadBits((8 << len) - 2)
 }
 
+// ReadFrame reads a frame header and returns the different pieces of the frame.
 func (fr *frameReader) ReadFrame() (frameType, byte, FrameReader, error) {
 	len, err := fr.ReadVarint()
 	if err != nil {
@@ -72,26 +77,36 @@ func (fr *frameReader) Limited(n uint64) FrameReader {
 	return NewFrameReader(&io.LimitedReader{R: fr, N: int64(n)})
 }
 
-type FrameWriter interface {
-	bitio.BitWriter
-	WriteVarint(v uint64) (int64, error)
-	WriteFrame(t frameType, f byte, p []byte) error
+// CheckForEOF returns an error if the reader has remaining data.
+func (fr *frameReader) CheckForEOF() error {
+	var p [1]byte
+	n, err := fr.Read(p[:])
+	if err != nil && err != io.EOF {
+		return err
+	}
+	if n > 0 {
+		return ErrExtraData
+	}
+	return nil
 }
 
-type FrameWriteCloser interface {
-	FrameWriter
-	io.Closer
+// FrameWriter wraps the io.Writer interface with HTTP/QUIC helper functions.
+type FrameWriter interface {
+	bitio.BitWriter
+	WriteVarint(v uint64) (int, error)
+	WriteFrame(t frameType, f byte, p []byte) (int, error)
 }
 
 type frameWriter struct {
 	bitio.BitWriter
 }
 
+// NewFrameWriter makes a FrameWriter.
 func NewFrameWriter(w io.Writer) FrameWriter {
 	return &frameWriter{bitio.NewBitWriter(w)}
 }
 
-func (fw *frameWriter) WriteVarint(v uint64) (int64, error) {
+func (fw *frameWriter) WriteVarint(v uint64) (int, error) {
 	var size byte
 	switch {
 	case v >= 1<<62:
@@ -114,22 +129,38 @@ func (fw *frameWriter) WriteVarint(v uint64) (int64, error) {
 	if err != nil {
 		return 0, nil
 	}
-	return int64(n), nil
+	return int(n), nil
 }
 
-func (fw *frameWriter) WriteFrame(t frameType, f byte, p []byte) error {
-	_, err := fw.WriteVarint(uint64(len(p)))
+func (fw *frameWriter) WriteFrame(t frameType, f byte, p []byte) (int, error) {
+	written, err := fw.WriteVarint(uint64(len(p)))
 	if err != nil {
-		return err
+		return written, err
 	}
 	err = fw.WriteByte(byte(t))
 	if err != nil {
-		return err
+		return written, err
 	}
 	err = fw.WriteByte(byte(f))
 	if err != nil {
-		return err
+		return written, err
 	}
-	_, err = io.Copy(fw, bytes.NewReader(p))
-	return err
+	n, err := io.Copy(fw, bytes.NewReader(p))
+	return written + int(n) + 2, err
+}
+
+// FrameWriteCloser adds io.Closer to the FrameWriter interface.
+type FrameWriteCloser interface {
+	FrameWriter
+	io.Closer
+}
+
+type frameWriteCloser struct {
+	FrameWriter
+	io.Closer
+}
+
+// NewFrameWriteCloser makes a FrameWriteCloser.
+func NewFrameWriteCloser(w io.WriteCloser) FrameWriteCloser {
+	return &frameWriteCloser{NewFrameWriter(w), w}
 }

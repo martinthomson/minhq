@@ -1,7 +1,6 @@
 package minhq
 
 import (
-	"bytes"
 	"errors"
 	"net/url"
 	"sync/atomic"
@@ -11,46 +10,37 @@ import (
 	"github.com/martinthomson/minhq/mw"
 )
 
+// ClientConnection is a connection specialized for use by clients.
 type ClientConnection struct {
-	Connection
-	requestId uint64
+	connection
+	requestID uint64
 }
 
+// NewClientConnection wraps an instance of minq.Connection.
 func NewClientConnection(qc *minq.Connection, config Config) *ClientConnection {
 	hq := &ClientConnection{
-		Connection: Connection{
+		connection: connection{
 			Connection: *mw.NewConnection(qc),
 
 			decoder: hc.NewQcramDecoder(config.DecoderTableCapacity),
 			encoder: hc.NewQcramEncoder(0, 0),
 		},
-		requestId: 0,
+		requestID: 0,
 	}
 	hq.Init(hq)
 	return hq
 }
 
+// HandleFrame is for dealing with those frames that Connection can't.
 func (c *ClientConnection) HandleFrame(t frameType, f byte, r FrameReader) error {
 	return ErrInvalidFrame
 }
 
-func (c *ClientConnection) nextRequestId() *requestId {
-	return &requestId{atomic.AddUint64(&c.requestId, 1), 0}
+func (c *ClientConnection) nextRequestID() *requestID {
+	return &requestID{atomic.AddUint64(&c.requestID, 1), 0}
 }
 
-func writeHeaderBlock(encoder *hc.QcramEncoder, headersStream FrameWriter, requestStream FrameWriter, token interface{}) error {
-	var controlBuf, headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token)
-	if err != nil {
-		return err
-	}
-	err = headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
-	if err != nil {
-		return err
-	}
-	return requestStream.WriteFrame(frameHeaders, 0, headerBuf.Bytes())
-}
-
+// Fetch makes a request.
 func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderField) (*ClientRequest, error) {
 	u, err := url.Parse(target)
 	if err != nil {
@@ -71,14 +61,14 @@ func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderFiel
 	allHeaders[3].Value = "https"
 	copy(allHeaders[4:], h)
 
-	requestId := c.nextRequestId()
+	requestID := c.nextRequestID()
 	s := newStream(c.CreateStream())
-	_, err = s.WriteVarint(requestId.id)
+	_, err = s.WriteVarint(requestID.id)
 	if err != nil {
 		return nil, err
 	}
 
-	err = writeHeaderBlock(c.encoder, c.headersStream, s, requestId)
+	err = writeHeaderBlock(c.encoder, c.headersStream, s, requestID)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +77,7 @@ func (c *ClientConnection) Fetch(method string, target string, h []hc.HeaderFiel
 	req := &ClientRequest{
 		Headers:   allHeaders,
 		Response:  responseChannel,
-		requestId: requestId,
+		requestID: requestID,
 
 		requestStream: s,
 

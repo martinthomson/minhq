@@ -9,6 +9,8 @@ type stream struct {
 	recvStream
 }
 
+var _ minq.Stream = &stream{}
+
 func newStream(s minq.Stream) *stream {
 	return &stream{
 		sendStream: sendStream{NewFrameWriter(s), s},
@@ -16,40 +18,43 @@ func newStream(s minq.Stream) *stream {
 	}
 }
 
-var _ minq.Stream = &stream{}
+// Id is needed to resolve an ambiguity between sendStream and recvStream.
+func (s *stream) Id() uint64 {
+	return s.sendStream.Id()
+}
+
+// abort is the option of last resort.
+func (s *stream) abort() {
+	s.Reset(ErrQuicWtf)
+	s.StopSending(ErrQuicWtf) // TODO change error codes to something sensible.
+}
 
 type sendStream struct {
 	FrameWriter
-	s minq.SendStream
+	minq.SendStream
 }
+
+var _ minq.SendStream = &sendStream{}
 
 func newSendStream(s minq.SendStream) *sendStream {
-	return &sendStream{
-		NewFrameWriter(s),
-		s,
-	}
+	return &sendStream{NewFrameWriter(s), s}
 }
 
-func (s *sendStream) Close() error {
-	return s.s.Close()
-}
-
-func (s *sendStream) Reset(code minq.ErrorCode) error {
-	return s.s.Reset(code)
+func (s *sendStream) Write(p []byte) (int, error) {
+	return s.FrameWriter.Write(p)
 }
 
 type recvStream struct {
 	FrameReader
-	s minq.RecvStream
+	minq.RecvStream
 }
+
+var _ minq.RecvStream = &recvStream{}
 
 func newRecvStream(s minq.RecvStream) *recvStream {
-	return &recvStream{
-		NewFrameReader(s),
-		s,
-	}
+	return &recvStream{NewFrameReader(s), s}
 }
 
-func (s *recvStream) StopSending(code minq.ErrorCode) error {
-	return s.s.StopSending(code)
+func (s *recvStream) Read(p []byte) (int, error) {
+	return s.FrameReader.Read(p)
 }

@@ -35,24 +35,26 @@ func (sw *settingsWriter) writeIntSetting(fw FrameWriter, s settingType, v uint6
 	}
 
 	err = fw.WriteBits(uint64(s), 16)
-	written := int64(2)
-	n64, err := fw.WriteVarint(uint64(buf.Len()))
-	written += n64
+	n, err := fw.WriteVarint(uint64(buf.Len()))
+	written := int64(n) + 2
 	if err != nil {
 		return written, err
 	}
-	n64, err = io.Copy(fw, &buf)
+	n64, err := io.Copy(fw, &buf)
 	written += n64
 	return written, err
 }
 
 type settingsReader struct {
-	c *Connection
+	c *connection
 }
 
 func (sr *settingsReader) readSettings(r FrameReader) error {
 	for {
 		s, err := r.ReadBits(16)
+		if err == io.EOF {
+			return nil
+		}
 		if err != nil {
 			return err
 		}
@@ -75,5 +77,4 @@ func (sr *settingsReader) readSettings(r FrameReader) error {
 			return err
 		}
 	}
-	return nil
 }

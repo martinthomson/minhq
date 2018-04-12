@@ -69,3 +69,15 @@ func TestVarintWriteOverflow(t *testing.T) {
 	_, err := fw.WriteVarint(1 << 63)
 	assert.NotNil(t, err)
 }
+
+func TestFrameRead(t *testing.T) {
+	fr := minhq.NewFrameReader(bytes.NewReader([]byte{1, 7, 0x84, 0}))
+	typ, f, r, err := fr.ReadFrame()
+	assert.Nil(t, err)
+	assert.Equal(t, minhq.FrameType(7), typ)
+	assert.Equal(t, byte(0x84), f)
+	var p [4]byte
+	n, err := r.Read(p[:])
+	assert.Nil(t, err)
+	assert.Equal(t, []byte{0}, p[:n])
+}

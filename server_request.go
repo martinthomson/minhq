@@ -1,12 +1,19 @@
 package minhq
 
-import "io"
+import (
+	"bytes"
+	"errors"
+	"io"
+
+	"github.com/martinthomson/minhq/hc"
+)
 
 // ServerRequest handles incoming requests.
 type ServerRequest struct {
-	c  *ServerConnection
-	s  *stream
-	ID uint64
+	c         *ServerConnection
+	s         *stream
+	ID        uint64
+	requestID *requestID // for tracking outstanding header fields
 	IncomingMessage
 }
 
@@ -15,6 +22,7 @@ func newServerRequest(c *ServerConnection, s *stream) *ServerRequest {
 		c:               c,
 		s:               s,
 		ID:              0,
+		requestID:       c.nextRequestID(),
 		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
 	}
 }
@@ -34,11 +42,108 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 	}
 	req.Headers = headers
 	requests <- req
-	err = req.read(req.s, func(t frameType, f byte, r io.Reader) error {
+	err = req.read(req.s, func(t FrameType, f byte, r io.Reader) error {
 		return ErrUnsupportedFrame
 	})
 	if err != nil {
 		req.s.abort()
 		return
 	}
+}
+
+func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
+	s FrameWriteCloser, push *ServerPushRequest) (*ServerResponse, error) {
+	allHeaders := append([]hc.HeaderField{
+		hc.HeaderField{Name: ":status", Value: string(statusCode)},
+	}, headers...)
+
+	err := writeHeaderBlock(req.c.encoder, req.c.headersStream, s, req.requestID, allHeaders)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ServerResponse{
+		Request:         req,
+		PushRequest:     push,
+		OutgoingMessage: newOutgoingMessage(&req.c.connection, s, req.requestID, allHeaders),
+	}, nil
+}
+
+// Respond creates a response, starting by writing the response header block.
+func (req *ServerRequest) Respond(statusCode int, headers []hc.HeaderField) (*ServerResponse, error) {
+	return req.sendResponse(statusCode, headers, req.s, nil)
+}
+
+// Push creates a new server push.
+func (req *ServerRequest) Push(method string, target string, headers []hc.HeaderField) (*ServerPushRequest, error) {
+	allHeaders, err := buildRequestHeaderFields(method, target, headers)
+	if err != nil {
+		return nil, err
+	}
+
+	pushID, err := req.c.getNextPushID()
+	if err != nil {
+		return nil, err
+	}
+
+	var controlBuf, headerBuf bytes.Buffer
+	headerWriter := NewFrameWriter(&headerBuf)
+	_, err = headerWriter.WriteVarint(pushID)
+	if err != nil {
+		return nil, err
+	}
+	err = req.c.encoder.WriteHeaderBlock(NewFrameWriter(&controlBuf), headerWriter,
+		req.c.outstanding.add(req.requestID), allHeaders...)
+	if err != nil {
+		return nil, err
+	}
+	_, err = req.c.headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	_, err = req.s.WriteFrame(framePushPromise, 0, headerBuf.Bytes())
+	if err != nil {
+		return nil, err
+	}
+
+	return &ServerPushRequest{
+		Request: req,
+		PushID:  pushID,
+		Headers: allHeaders,
+	}, nil
+}
+
+// ServerResponse can be used to write response bodies and trailers.
+type ServerResponse struct {
+	// Request is the request that this response is associated with.
+	Request *ServerRequest
+	// Push is the push promise, which might be nil.
+	PushRequest *ServerPushRequest
+	OutgoingMessage
+}
+
+// Push just forwards the server push to ServerRequest.Push.
+func (resp *ServerResponse) Push(method string, target string, headers []hc.HeaderField) (*ServerPushRequest, error) {
+	return resp.Request.Push(method, target, headers)
+}
+
+// ServerPushRequest is a more limited version of ServerRequest.
+type ServerPushRequest struct {
+	Request *ServerRequest
+	PushID  uint64
+	Headers []hc.HeaderField
+}
+
+// Respond on ServerPushRequest is functionally identical to the same function on ServerRequest.
+func (push *ServerPushRequest) Respond(statusCode int, headers []hc.HeaderField) (*ServerResponse, error) {
+	send := push.Request.c.CreateSendStream()
+	if send == nil {
+		return nil, errors.New("No available send streams for push response")
+	}
+	s := newSendStream(send)
+	_, err := s.WriteVarint(push.PushID)
+	if err != nil {
+		return nil, err
+	}
+	return push.Request.sendResponse(statusCode, headers, s, push)
 }

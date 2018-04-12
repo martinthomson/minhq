@@ -1,6 +1,9 @@
 package minhq
 
 import (
+	"errors"
+	"sync"
+
 	"github.com/martinthomson/minhq/hc"
 	"github.com/martinthomson/minhq/mw"
 )
@@ -9,8 +12,11 @@ import (
 type ServerConnection struct {
 	connection
 
-	Requests  <-chan *ServerRequest
-	maxPushID uint64
+	Requests <-chan *ServerRequest
+
+	pushIDLock sync.RWMutex
+	nextPushID uint64
+	maxPushID  uint64
 }
 
 // NewServerConnection wraps an instance of mw.Connection with server-related capabilities.
@@ -48,20 +54,34 @@ func (c *ServerConnection) handleMaxPushID(f byte, r FrameReader) error {
 		c.FatalError(ErrWtf)
 		return err
 	}
-	if n > c.maxPushID {
-		c.maxPushID = n
-	}
 	err = r.CheckForEOF()
 	if err != nil {
 		c.FatalError(ErrWtf)
 		return err
 	}
 
+	c.pushIDLock.Lock()
+	defer c.pushIDLock.Unlock()
+	if n > c.maxPushID {
+		c.maxPushID = n
+	}
 	return nil
 }
 
+func (c *ServerConnection) getNextPushID() (uint64, error) {
+	c.pushIDLock.RLock()
+	defer c.pushIDLock.RUnlock()
+	if c.nextPushID >= c.maxPushID {
+		return 0, errors.New("No push IDs available")
+	}
+
+	id := c.nextPushID
+	c.nextPushID++
+	return id, nil
+}
+
 // HandleFrame is for dealing with those frames that Connection can't.
-func (c *ServerConnection) HandleFrame(t frameType, f byte, r FrameReader) error {
+func (c *ServerConnection) HandleFrame(t FrameType, f byte, r FrameReader) error {
 	switch t {
 	case frameMaxPushID:
 		return c.handleMaxPushID(f, r)

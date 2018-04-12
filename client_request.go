@@ -3,8 +3,6 @@ package minhq
 import (
 	"io"
 	"io/ioutil"
-
-	"github.com/martinthomson/minhq/hc"
 )
 
 type requestID struct {
@@ -20,32 +18,9 @@ type requestID struct {
 // To use this, make one using Connection.Fetch(). Write any body, then close
 // the request with any trailers.
 type ClientRequest struct {
-	Headers   []hc.HeaderField
-	Response  <-chan *ClientResponse
-	requestID *requestID
+	Response <-chan *ClientResponse
 
-	requestStream FrameWriteCloser
-
-	// This stuff is all needed for trailers (ugh).
-	encoder       *hc.QcramEncoder
-	headersStream FrameWriter
-	outstanding   *outstandingHeaders
-}
-
-func (req *ClientRequest) Write(p []byte) (int, error) {
-	return req.requestStream.WriteFrame(frameData, 0, p)
-}
-
-// Close closes out the stream, writing any trailers that might be included.
-func (req *ClientRequest) Close(trailers []hc.HeaderField) error {
-	if trailers != nil {
-		err := writeHeaderBlock(req.encoder, req.headersStream, req.requestStream,
-			req.outstanding.add(req.requestID))
-		if err != nil {
-			return err
-		}
-	}
-	return req.requestStream.Close()
+	OutgoingMessage
 }
 
 func (req *ClientRequest) handlePushPromise(f byte, r io.Reader) error {
@@ -73,7 +48,7 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		IncomingMessage: newIncomingMessage(c.connection.decoder, headers),
 	}
 	responseChannel <- resp
-	err = resp.read(s, func(t frameType, f byte, r io.Reader) error {
+	err = resp.read(s, func(t FrameType, f byte, r io.Reader) error {
 		switch t {
 		case framePushPromise:
 			err := req.handlePushPromise(f, r)

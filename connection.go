@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
+	"sync/atomic"
 
 	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/hc"
@@ -79,7 +80,7 @@ func (oh *outstandingHeaders) ack(id uint64) *requestID {
 
 // FrameHandler is used by subclasses of connection to deal with frames that only they handle.
 type FrameHandler interface {
-	HandleFrame(frameType, byte, FrameReader) error
+	HandleFrame(FrameType, byte, FrameReader) error
 }
 
 // connection is an abstract wrapper around mw.Connection (a wrapper around
@@ -90,9 +91,10 @@ type connection struct {
 
 	decoder         *hc.QcramDecoder
 	encoder         *hc.QcramEncoder
-	controlStream   *sendStream
-	headersStream   *sendStream
-	headerAckStream *sendStream
+	controlStream   *sendStream2
+	headersStream   *sendStream2
+	headerAckStream *sendStream2
+	requestID       uint64
 	outstanding     outstandingHeaders
 
 	unknownFrameHandler FrameHandler
@@ -114,6 +116,13 @@ func (c *connection) Init(fh FrameHandler) {
 // FatalError is a helper that passes on HTTP errors to the underlying connection.
 func (c *connection) FatalError(e HTTPError) {
 	c.Close()
+}
+
+// Both client and server need to track outstanding header blocks. They both use
+// the same structure. The server only uses this for internal tracking, but the
+// client also uses this to pick the request ID it includes in requests.
+func (c *connection) nextRequestID() *requestID {
+	return &requestID{atomic.AddUint64(&c.requestID, 1), 0}
 }
 
 func (c *connection) handlePriority(f byte, r io.Reader) error {

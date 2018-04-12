@@ -8,18 +8,19 @@ import (
 	"github.com/martinthomson/minhq/bitio"
 )
 
-type frameType byte
+// FrameType is the type of an HTTP/QUIC frame.
+type FrameType byte
 
 const (
-	frameData        = frameType(0)
-	frameHeaders     = frameType(1)
-	framePriority    = frameType(2)
-	frameCancelPush  = frameType(3)
-	frameSettings    = frameType(4)
-	framePushPromise = frameType(5)
-	frameGoaway      = frameType(7)
-	frameHeaderAck   = frameType(8)
-	frameMaxPushID   = frameType(13)
+	frameData        = FrameType(0)
+	frameHeaders     = FrameType(1)
+	framePriority    = FrameType(2)
+	frameCancelPush  = FrameType(3)
+	frameSettings    = FrameType(4)
+	framePushPromise = FrameType(5)
+	frameGoaway      = FrameType(7)
+	frameHeaderAck   = FrameType(8)
+	frameMaxPushID   = FrameType(13)
 )
 
 // ErrUnsupportedFrame signals that an unsupported frame was received.
@@ -32,7 +33,7 @@ var ErrTooLarge = errors.New("Value too large for the field")
 type FrameReader interface {
 	bitio.BitReader
 	ReadVarint() (uint64, error)
-	ReadFrame() (frameType, byte, FrameReader, error)
+	ReadFrame() (FrameType, byte, FrameReader, error)
 	Limited(n uint64) FrameReader
 	CheckForEOF() error
 }
@@ -56,7 +57,7 @@ func (fr *frameReader) ReadVarint() (uint64, error) {
 }
 
 // ReadFrame reads a frame header and returns the different pieces of the frame.
-func (fr *frameReader) ReadFrame() (frameType, byte, FrameReader, error) {
+func (fr *frameReader) ReadFrame() (FrameType, byte, FrameReader, error) {
 	len, err := fr.ReadVarint()
 	if err != nil {
 		return 0, 0, nil, err
@@ -69,7 +70,7 @@ func (fr *frameReader) ReadFrame() (frameType, byte, FrameReader, error) {
 	if err != nil {
 		return 0, 0, nil, err
 	}
-	return frameType(t), f, fr.Limited(len), nil
+	return FrameType(t), f, fr.Limited(len), nil
 }
 
 // Limited makes an io.LimitedReader that reads the next `n` bytes from this reader.
@@ -94,7 +95,7 @@ func (fr *frameReader) CheckForEOF() error {
 type FrameWriter interface {
 	bitio.BitWriter
 	WriteVarint(v uint64) (int, error)
-	WriteFrame(t frameType, f byte, p []byte) (int, error)
+	WriteFrame(t FrameType, f byte, p []byte) (int, error)
 }
 
 type frameWriter struct {
@@ -132,7 +133,7 @@ func (fw *frameWriter) WriteVarint(v uint64) (int, error) {
 	return int(n), nil
 }
 
-func (fw *frameWriter) WriteFrame(t frameType, f byte, p []byte) (int, error) {
+func (fw *frameWriter) WriteFrame(t FrameType, f byte, p []byte) (int, error) {
 	written, err := fw.WriteVarint(uint64(len(p)))
 	if err != nil {
 		return written, err

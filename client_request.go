@@ -3,6 +3,7 @@ package minhq
 import (
 	"io"
 	"io/ioutil"
+	"strconv"
 )
 
 type requestID struct {
@@ -47,6 +48,12 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		Request:         req,
 		IncomingMessage: newIncomingMessage(c.connection.decoder, headers),
 	}
+	resp.Status, err = strconv.Atoi(resp.GetHeader(":status"))
+	if err != nil {
+		s.abort()
+		return
+	}
+
 	responseChannel <- resp
 	err = resp.read(s, func(t FrameType, f byte, r io.Reader) error {
 		switch t {
@@ -70,4 +77,5 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 type ClientResponse struct {
 	Request *ClientRequest
 	IncomingMessage
+	Status int
 }

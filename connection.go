@@ -33,8 +33,7 @@ func (e HTTPError) String() string {
 // These errors are commonly reported error codes.
 var (
 	ErrWtf = HTTPError(3)
-	// minq doesn't export ErrProtocolViolation, though it should.
-	ErrQuicWtf      = minq.ErrorCode(0xa)
+	ErrQuicWtf      = minq.ErrorCode(0xa) // TODO use app error code
 	ErrExtraData    = errors.New("Extra data at the end of a frame")
 	ErrNonZeroFlags = errors.New("Frame flags were non-zero")
 	ErrInvalidFrame = errors.New("Invalid frame type for context")
@@ -105,9 +104,12 @@ type connection struct {
 func (c *connection) Init(fh FrameHandler) {
 	c.unknownFrameHandler = fh
 
+    // TODO: ensure that each of these streams have something written on them so
+    // that they are created at the peer.
 	c.controlStream = newSendStream(c.CreateSendStream())
 	c.headersStream = newSendStream(c.CreateSendStream())
 	c.headerAckStream = newSendStream(c.CreateSendStream())
+
 	go c.serviceControlStream(newRecvStream(<-c.RemoteRecvStreams))
 	go c.serviceHeadersStream(newRecvStream(<-c.RemoteRecvStreams))
 	go c.serviceHeaderAckStream(newRecvStream(<-c.RemoteRecvStreams))

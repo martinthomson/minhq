@@ -1,7 +1,6 @@
 package minhq
 
 import (
-	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/hc"
 	"github.com/martinthomson/minhq/mw"
 )
@@ -12,16 +11,16 @@ type ClientConnection struct {
 }
 
 // NewClientConnection wraps an instance of minq.Connection.
-func NewClientConnection(qc *minq.Connection, config Config) *ClientConnection {
+func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 	hq := &ClientConnection{
 		connection: connection{
-			Connection: *mw.NewConnection(qc),
+			Connection: *mwc,
 
 			decoder: hc.NewQcramDecoder(config.DecoderTableCapacity),
 			encoder: hc.NewQcramEncoder(0, 0),
 		},
 	}
-	hq.Init(hq)
+	go hq.Init(hq)
 	return hq
 }
 
@@ -31,7 +30,7 @@ func (c *ClientConnection) HandleFrame(t FrameType, f byte, r FrameReader) error
 }
 
 // Fetch makes a request.
-func (c *ClientConnection) Fetch(method string, target string, headers []hc.HeaderField) (*ClientRequest, error) {
+func (c *ClientConnection) Fetch(method string, target string, headers... hc.HeaderField) (*ClientRequest, error) {
 	allHeaders, err := buildRequestHeaderFields(method, target, headers)
 	if err != nil {
 		return nil, err

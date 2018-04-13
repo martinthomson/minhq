@@ -10,7 +10,7 @@ import (
 
 // ServerRequest handles incoming requests.
 type ServerRequest struct {
-	c         *ServerConnection
+	C         *ServerConnection
 	s         *stream
 	ID        uint64
 	requestID *requestID // for tracking outstanding header fields
@@ -19,7 +19,7 @@ type ServerRequest struct {
 
 func newServerRequest(c *ServerConnection, s *stream) *ServerRequest {
 	return &ServerRequest{
-		c:               c,
+		C:               c,
 		s:               s,
 		ID:              0,
 		requestID:       c.nextRequestID(),
@@ -35,7 +35,7 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 	}
 	req.ID = reqID
 
-	headers, err := req.c.decoder.ReadHeaderBlock(req.s)
+	headers, err := req.C.decoder.ReadHeaderBlock(req.s)
 	if err != nil {
 		req.s.abort()
 		return
@@ -57,7 +57,7 @@ func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 		hc.HeaderField{Name: ":status", Value: string(statusCode)},
 	}, headers...)
 
-	err := writeHeaderBlock(req.c.encoder, req.c.headersStream, s, req.requestID, allHeaders)
+	err := writeHeaderBlock(req.C.encoder, req.C.headersStream, s, req.requestID, allHeaders)
 	if err != nil {
 		return nil, err
 	}
@@ -65,12 +65,12 @@ func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 	return &ServerResponse{
 		Request:         req,
 		PushRequest:     push,
-		OutgoingMessage: newOutgoingMessage(&req.c.connection, s, req.requestID, allHeaders),
+		OutgoingMessage: newOutgoingMessage(&req.C.connection, s, req.requestID, allHeaders),
 	}, nil
 }
 
 // Respond creates a response, starting by writing the response header block.
-func (req *ServerRequest) Respond(statusCode int, headers []hc.HeaderField) (*ServerResponse, error) {
+func (req *ServerRequest) Respond(statusCode int, headers... hc.HeaderField) (*ServerResponse, error) {
 	return req.sendResponse(statusCode, headers, req.s, nil)
 }
 
@@ -81,7 +81,7 @@ func (req *ServerRequest) Push(method string, target string, headers []hc.Header
 		return nil, err
 	}
 
-	pushID, err := req.c.getNextPushID()
+	pushID, err := req.C.getNextPushID()
 	if err != nil {
 		return nil, err
 	}
@@ -92,12 +92,12 @@ func (req *ServerRequest) Push(method string, target string, headers []hc.Header
 	if err != nil {
 		return nil, err
 	}
-	err = req.c.encoder.WriteHeaderBlock(NewFrameWriter(&controlBuf), headerWriter,
-		req.c.outstanding.add(req.requestID), allHeaders...)
+	err = req.C.encoder.WriteHeaderBlock(NewFrameWriter(&controlBuf), headerWriter,
+		req.C.outstanding.add(req.requestID), allHeaders...)
 	if err != nil {
 		return nil, err
 	}
-	_, err = req.c.headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
+	_, err = req.C.headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
 	if err != nil {
 		return nil, err
 	}
@@ -136,7 +136,7 @@ type ServerPushRequest struct {
 
 // Respond on ServerPushRequest is functionally identical to the same function on ServerRequest.
 func (push *ServerPushRequest) Respond(statusCode int, headers []hc.HeaderField) (*ServerResponse, error) {
-	send := push.Request.c.CreateSendStream()
+	send := push.Request.C.CreateSendStream()
 	if send == nil {
 		return nil, errors.New("No available send streams for push response")
 	}

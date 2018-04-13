@@ -12,27 +12,23 @@ import (
 type ServerConnection struct {
 	connection
 
-	Requests <-chan *ServerRequest
-
 	pushIDLock sync.RWMutex
 	nextPushID uint64
 	maxPushID  uint64
 }
 
-// NewServerConnection wraps an instance of mw.Connection with server-related capabilities.
-func NewServerConnection(mc *mw.Connection, config Config) *ServerConnection {
-	requests := make(chan *ServerRequest)
+// newServerConnection wraps an instance of mw.Connection with server-related capabilities.
+func newServerConnection(mwc *mw.Connection, config *Config, requests chan<- *ServerRequest) *ServerConnection {
 	hq := &ServerConnection{
 		connection: connection{
-			Connection: *mc,
+			Connection: *mwc,
 
 			decoder: hc.NewQcramDecoder(config.DecoderTableCapacity),
 			encoder: hc.NewQcramEncoder(0, 0),
 		},
-		Requests:  requests,
 		maxPushID: 0,
 	}
-	hq.Init(hq)
+	go hq.Init(hq)
 	go hq.serviceRequests(requests)
 	return hq
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/url"
+	"strings"
 
 	"github.com/martinthomson/minhq/hc"
 )
@@ -99,6 +100,24 @@ func (msg *IncomingMessage) read(fr FrameReader, frameHandler incomingMessageFra
 		return nil
 	}
 	return err
+}
+
+// GetHeader performs a case-insensitive lookup for a given name.
+// This returns an empty string if the header field wasn't present.
+// Multiple values are concatenated using commas.
+func (msg *IncomingMessage) GetHeader(n string) string {
+	v := ""
+	for _, h := range msg.Headers {
+		// Incoming messages have all lowercase names.
+		if h.Name == strings.ToLower(n) {
+			if len(v) > 0 {
+				v += "," + h.Value
+			} else {
+				v = h.Value
+			}
+		}
+	}
+	return v
 }
 
 type concatenatingReader struct {

@@ -74,9 +74,9 @@ func newConnection(mc *minq.Connection, ops connectionOperations) *Connection {
 	return c
 }
 
-// NewConnction makes a new client connection.
+// NewConnection makes a new client connection.
 func NewConnection(mc *minq.Connection) *Connection {
-	ops := connectionOperations(make(chan interface{}))
+	ops := connectionOperations{make(chan interface{}), 0}
 	c := newConnection(mc, ops)
 	// Only clients need to handle packets directly. Server handles routing of
 	// incoming packets for servers.
@@ -111,7 +111,7 @@ func (c *Connection) service() {
 			return
 		}
 		select {
-		case op := <-c.ops:
+		case op := <-c.ops.ch:
 			c.ops.Handle(op, func(p *Packet) {
 				_ = c.minq.Input(p.Data)
 			})
@@ -176,27 +176,27 @@ func (c *Connection) handleReadRequest(req *readRequest) {
 // GetState returns the current connection of the connection.
 func (c *Connection) GetState() minq.State {
 	state := make(chan minq.State)
-	c.ops <- &getStateRequest{c, state}
+	c.ops.Add(&getStateRequest{c, state})
 	return <-state
 }
 
 // Close the connection.
 func (c *Connection) Close( /* TODO application error code */ ) error {
-	c.ops <- &closeConnectionRequest{c}
+	c.ops.Add(&closeConnectionRequest{c})
 	<-c.closed
 	return nil
 }
 
-// CreateBidirectionalStream creates a new stream.
+// CreateStream creates a new bidirectional stream.
 func (c *Connection) CreateStream() minq.Stream {
 	result := make(chan minq.Stream)
-	c.ops <- &createStreamRequest{c, result}
+	c.ops.Add(&createStreamRequest{c, result})
 	return <-result
 }
 
-// CreateSendStream creates a new stream.
+// CreateSendStream creates a new unidirectional stream for sending.
 func (c *Connection) CreateSendStream() minq.SendStream {
 	result := make(chan minq.SendStream)
-	c.ops <- &createSendStreamRequest{c, result}
+	c.ops.Add(&createSendStreamRequest{c, result})
 	return <-result
 }

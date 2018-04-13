@@ -6,6 +6,7 @@ import (
 	"github.com/ekr/minq"
 )
 
+// Server is the server side of the connection.  It accepts multiple connections.
 type Server struct {
 	s *minq.Server
 
@@ -31,6 +32,7 @@ func (sh *serverHandler) NewConnection(mc *minq.Connection) {
 	}()
 }
 
+// RunServer creates a Server and starts goroutines to service that server.
 func RunServer(ms *minq.Server) *Server {
 	connections := make(chan *Connection)
 	incoming := make(chan *Packet)
@@ -38,7 +40,7 @@ func RunServer(ms *minq.Server) *Server {
 		s:               ms,
 		Connections:     connections,
 		IncomingPackets: incoming,
-		ops:             connectionOperations(make(chan interface{})),
+		ops:             connectionOperations{make(chan interface{}), 0},
 		shutdown:        make(chan chan<- struct{}),
 	}
 	ms.SetHandler(&serverHandler{connections, s.ops})
@@ -54,7 +56,7 @@ func (s *Server) service() {
 
 	for {
 		select {
-		case op := <-s.ops:
+		case op := <-s.ops.ch:
 			s.ops.Handle(op, func(p *Packet) {
 				_, _ = s.s.Input(p.RemoteAddr, p.Data)
 			})

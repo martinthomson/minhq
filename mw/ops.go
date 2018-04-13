@@ -2,6 +2,7 @@ package mw
 
 import (
 	"errors"
+	"sync/atomic"
 
 	"github.com/ekr/minq"
 )
@@ -80,16 +81,25 @@ type closeConnectionRequest struct {
 	// TODO error code.
 }
 
-type connectionOperations chan interface{}
+type connectionOperations struct {
+	ch     chan interface{}
+	closed uint32
+}
+
+func (ops connectionOperations) Add(op interface{}) {
+	if atomic.LoadUint32(&ops.closed) == 0 {
+		ops.ch <- op
+	}
+}
 
 // ReadPackets is intended to handle a channel of incoming packets.  Intended to be run as a goroutine.
 func (ops connectionOperations) ReadPackets(incoming chan *Packet) {
 	for {
-		p := <-incoming
-		if p == nil {
-			break
+		p, ok := <-incoming
+		if !ok {
+			return
 		}
-		ops <- p
+		ops.ch <- p
 	}
 }
 
@@ -152,20 +162,23 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 }
 
 func (ops connectionOperations) Close() error {
-	// Drain the channel so that  any outstanding operations won't hang.
+	if atomic.SwapUint32(&ops.closed, 1) == 0 {
+		go ops.drain()
+		close(ops.ch)
+	}
+	return nil
+}
+
+func (ops connectionOperations) drain() {
+	// Drain the channel so that any outstanding operations won't hang.
 	for {
 		var operation interface{}
 		select {
-		case v, ok := <-ops:
+		case v, ok := <-ops.ch:
 			if !ok {
-				close(ops)
-				return nil
+				return
 			}
 			operation = v
-
-		default:
-			close(ops)
-			return nil
 		}
 
 		switch op := operation.(type) {

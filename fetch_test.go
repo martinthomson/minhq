@@ -21,6 +21,10 @@ func TestFetch(t *testing.T) {
 	cs := test.NewClientServerPair(func(ms *minq.Server) *mw.Server {
 		server = minhq.RunServer(ms, config)
 		return &server.Server
+	}, func(ms *mw.Server) *mw.Connection {
+		assert.Equal(t, &server.Server, ms)
+		serverConnection := <-server.Connections
+		return &serverConnection.Connection
 	})
 
 	clientConnection := minhq.NewClientConnection(cs.ClientConnection, config)
@@ -28,6 +32,8 @@ func TestFetch(t *testing.T) {
 		hc.HeaderField{Name: "User-Agent", Value: "Test"})
 	assert.Nil(t, err)
 	assert.Nil(t, clientRequest.Close())
+
+	println("request out")
 
 	serverRequest := <-server.Requests
 	assert.Equal(t, "Test", serverRequest.GetHeader("user-AGENT"))

@@ -1,6 +1,7 @@
 package hc
 
 import (
+	"strings"
 	"errors"
 	"io"
 	"sync"
@@ -186,7 +187,10 @@ type qcramWriterState struct {
 }
 
 func (state *qcramWriterState) init(headers []HeaderField, token interface{}) {
-	state.headers = headers
+	state.headers = make([]HeaderField, len(headers))
+	for i, h := range headers {
+		state.headers[i] = HeaderField{strings.ToLower(h.Name), h.Value, h.Sensitive}
+	}
 	state.matches = make([]Entry, len(headers))
 	state.nameMatches = make([]Entry, len(headers))
 	state.smallestBase = int(^uint(0) >> 1)

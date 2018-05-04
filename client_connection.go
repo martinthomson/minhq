@@ -1,9 +1,15 @@
 package minhq
 
 import (
+	"errors"
+
 	"github.com/martinthomson/minhq/hc"
 	"github.com/martinthomson/minhq/mw"
 )
+
+// ErrStreamBlocked is used to indicate that there are no streams available.
+// TODO: consider blocking until a stream is available.
+var ErrStreamBlocked = errors.New("Unable to open a new stream for the request")
 
 // ClientConnection is a connection specialized for use by clients.
 type ClientConnection struct {
@@ -20,7 +26,7 @@ func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 			encoder: hc.NewQcramEncoder(0, 0),
 		},
 	}
-	go hq.Init(hq)
+	hq.Init(hq)
 	return hq
 }
 
@@ -30,7 +36,7 @@ func (c *ClientConnection) HandleFrame(t FrameType, f byte, r FrameReader) error
 }
 
 // Fetch makes a request.
-func (c *ClientConnection) Fetch(method string, target string, headers... hc.HeaderField) (*ClientRequest, error) {
+func (c *ClientConnection) Fetch(method string, target string, headers ...hc.HeaderField) (*ClientRequest, error) {
 	allHeaders, err := buildRequestHeaderFields(method, target, headers)
 	if err != nil {
 		return nil, err
@@ -38,6 +44,9 @@ func (c *ClientConnection) Fetch(method string, target string, headers... hc.Hea
 
 	requestID := c.nextRequestID()
 	s := newStream(c.CreateStream())
+	if s == nil {
+		return nil, ErrStreamBlocked
+	}
 	_, err = s.WriteVarint(requestID.id)
 	if err != nil {
 		return nil, err

@@ -1,6 +1,8 @@
 package mw
 
 import (
+	"encoding/hex"
+	"fmt"
 	"net"
 	"time"
 
@@ -25,9 +27,11 @@ func (state *readState) readFrom(minqs minq.RecvStream) {
 	}
 	n, err := minqs.Read(state.reader.p)
 	if err == minq.ErrorWouldBlock {
+		fmt.Printf("Read from stream %d blocked\n", minqs.Id())
 		state.readable = false
 		return // That blocked.  Leave the reader in place.
 	}
+	fmt.Printf("Read from stream %d: %v\n", minqs.Id(), hex.EncodeToString(state.reader.p))
 	state.reader.result <- &ioResult{n, err}
 	state.reader = nil
 }
@@ -127,29 +131,38 @@ func (c *Connection) cleanup() {
 	close(c.remoteStreams)
 }
 
+// Note: each signal/upcall from minq uses a goroutine so that the main
+// goroutine doesn't block on any of these operations.
+
 // StateChanged is required by the minq.ConnectionHandler interface.
 func (c *Connection) StateChanged(s minq.State) {
-
-	switch s {
-	case minq.StateEstablished:
-		c.connected <- c
-	case minq.StateClosed, minq.StateError:
-		close(c.closed)
-	}
+	go func() {
+		switch s {
+		case minq.StateEstablished:
+			c.connected <- c
+		case minq.StateClosed, minq.StateError:
+			close(c.closed)
+		}
+	}()
 }
 
 // NewStream is required by the minq.ConnectionHandler interface.
 func (c *Connection) NewStream(s minq.Stream) {
-	c.remoteStreams <- &Stream{SendStream{c, s}, RecvStream{c, s}}
+	go func() {
+		c.remoteStreams <- &Stream{SendStream{c, s}, RecvStream{c, s}}
+	}()
 }
 
 // NewRecvStream is required by the minq.ConnectionHandler interface.
 func (c *Connection) NewRecvStream(s minq.RecvStream) {
-	c.remoteRecvStreams <- &RecvStream{c, s}
+	go func() {
+		c.remoteRecvStreams <- &RecvStream{c, s}
+	}()
 }
 
 // StreamReadable is required by the minq.ConnectionHandler interface.
 func (c *Connection) StreamReadable(s minq.RecvStream) {
+	fmt.Printf("Readable stream %v\n", s.Id())
 	state := c.readState[s]
 	if state == nil {
 		state = &readState{true, nil}

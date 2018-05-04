@@ -9,7 +9,7 @@ import (
 )
 
 func TestConnect(t *testing.T) {
-	cs := test.NewClientServerPair(mw.RunServer)
+	cs := test.NewClientServerPair(mw.RunServer, nil)
 	defer cs.Close()
 
 	cstr := cs.ClientConnection.CreateStream()

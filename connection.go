@@ -32,7 +32,7 @@ func (e HTTPError) String() string {
 
 // These errors are commonly reported error codes.
 var (
-	ErrWtf = HTTPError(3)
+	ErrWtf          = HTTPError(3)
 	ErrQuicWtf      = minq.ErrorCode(0xa) // TODO use app error code
 	ErrExtraData    = errors.New("Extra data at the end of a frame")
 	ErrNonZeroFlags = errors.New("Frame flags were non-zero")
@@ -90,9 +90,9 @@ type connection struct {
 
 	decoder         *hc.QcramDecoder
 	encoder         *hc.QcramEncoder
-	controlStream   *sendStream2
-	headersStream   *sendStream2
-	headerAckStream *sendStream2
+	controlStream   *sendStream
+	headersStream   *sendStream
+	headerAckStream *sendStream
 	requestID       uint64
 	outstanding     outstandingHeaders
 
@@ -104,15 +104,16 @@ type connection struct {
 func (c *connection) Init(fh FrameHandler) {
 	c.unknownFrameHandler = fh
 
-    // TODO: ensure that each of these streams have something written on them so
-    // that they are created at the peer.
 	c.controlStream = newSendStream(c.CreateSendStream())
 	c.headersStream = newSendStream(c.CreateSendStream())
 	c.headerAckStream = newSendStream(c.CreateSendStream())
 
-	go c.serviceControlStream(newRecvStream(<-c.RemoteRecvStreams))
-	go c.serviceHeadersStream(newRecvStream(<-c.RemoteRecvStreams))
-	go c.serviceHeaderAckStream(newRecvStream(<-c.RemoteRecvStreams))
+	// Asynchronously wait for incoming streams and then spawn handlers for each.
+	go func() {
+		go c.serviceControlStream(newRecvStream(<-c.RemoteRecvStreams))
+		go c.serviceHeadersStream(newRecvStream(<-c.RemoteRecvStreams))
+		go c.serviceHeaderAckStream(newRecvStream(<-c.RemoteRecvStreams))
+	}()
 }
 
 // FatalError is a helper that passes on HTTP errors to the underlying connection.
@@ -191,9 +192,18 @@ func (c *connection) serviceControlStream(controlStream *recvStream) {
 }
 
 func (c *connection) serviceHeadersStream(headersStream *recvStream) {
-	_ = c.decoder.ReadTableUpdates(headersStream)
-	if c.GetState() != minq.StateClosed {
-		c.FatalError(ErrWtf)
+	for {
+		t, f, r, err := headersStream.ReadFrame()
+		if err != nil || t != frameHeaders || f != 0 {
+			c.FatalError(ErrWtf)
+			return
+		}
+
+		err = c.decoder.ReadTableUpdates(r)
+		if err != nil {
+			c.FatalError(ErrWtf)
+			return
+		}
 	}
 }
 

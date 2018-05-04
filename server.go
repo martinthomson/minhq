@@ -10,25 +10,32 @@ type Server struct {
 	mw.Server
 	config *Config
 
+	// Incoming requests are the primary purpose of this API.
+	Requests <-chan *ServerRequest
+
+	// Connections holds the connections that have been established.
+	// Users of this API should ignore these with a simple goroutine like
+	// `go func() { for <-server.Connections != nil {} }()` unless they
+	// need direct access to the connection.
 	Connections <-chan *ServerConnection
-	Requests    <-chan *ServerRequest
 }
 
+// RunServer takes a minq Server and starts the various goroutines that service it.
 func RunServer(ms *minq.Server, config *Config) *Server {
-	connections := make(chan *ServerConnection)
 	requests := make(chan *ServerRequest)
+	connections:= make(chan *ServerConnection)
 	s := &Server{
 		Server:      *mw.RunServer(ms),
 		config:      config,
-		Connections: connections,
 		Requests:    requests,
+		Connections: connections,
 	}
 
-	go s.serviceConnections(connections, requests)
+	go s.serviceConnections(requests, connections)
 	return s
 }
 
-func (s *Server) serviceConnections(connections chan<- *ServerConnection, requests chan<- *ServerRequest) {
+func (s *Server) serviceConnections(requests chan<- *ServerRequest, connections chan<- *ServerConnection) {
 	for {
 		select {
 		case c := <-s.Server.Connections:

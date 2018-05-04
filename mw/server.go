@@ -1,6 +1,8 @@
 package mw
 
 import (
+	"encoding/hex"
+	"fmt"
 	"time"
 
 	"github.com/ekr/minq"
@@ -25,9 +27,11 @@ type serverHandler struct {
 	ops         connectionOperations
 }
 
+// NewConnection is part of the minq.ServerHandler interface.
+// Note the use of a goroutine to avoid blocking the main thread.
 func (sh *serverHandler) NewConnection(mc *minq.Connection) {
-	c := newServerConnection(mc, sh.ops)
 	go func() {
+		c := newServerConnection(mc, sh.ops)
 		sh.connections <- <-c.Connected
 	}()
 }
@@ -58,6 +62,7 @@ func (s *Server) service() {
 		select {
 		case op := <-s.ops.ch:
 			s.ops.Handle(op, func(p *Packet) {
+				fmt.Println("Feeding packet to server", hex.EncodeToString(p.Data))
 				_, _ = s.s.Input(p.RemoteAddr, p.Data)
 			})
 

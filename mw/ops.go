@@ -1,6 +1,8 @@
 package mw
 
 import (
+	"encoding/hex"
+	"fmt"
 	"errors"
 	"sync/atomic"
 
@@ -93,7 +95,7 @@ func (ops connectionOperations) Add(op interface{}) {
 }
 
 // ReadPackets is intended to handle a channel of incoming packets.  Intended to be run as a goroutine.
-func (ops connectionOperations) ReadPackets(incoming chan *Packet) {
+func (ops connectionOperations) ReadPackets(incoming <-chan *Packet) {
 	for {
 		p, ok := <-incoming
 		if !ok {
@@ -107,7 +109,7 @@ func (ops connectionOperations) ReadPackets(incoming chan *Packet) {
 func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet)) {
 	switch op := v.(type) {
 	case *getStateRequest:
-		op.result <- op.c.GetState()
+		op.result <- op.c.minq.GetState()
 
 	case *closeConnectionRequest:
 		op.c.minq.Close( /* TODO Application Close for minq */ )
@@ -125,6 +127,7 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 
 	case *writeRequest:
 		n, err := op.s.minq.Write(op.p)
+		fmt.Printf("Write on stream %v: %v\n", op.s.Id(), hex.EncodeToString(op.p))
 		op.result <- &ioResult{n, err}
 
 	case *closeStreamRequest:
@@ -164,7 +167,6 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 func (ops connectionOperations) Close() error {
 	if atomic.SwapUint32(&ops.closed, 1) == 0 {
 		go ops.drain()
-		close(ops.ch)
 	}
 	return nil
 }

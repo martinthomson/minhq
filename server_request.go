@@ -35,11 +35,18 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 	}
 	req.ID = reqID
 
-	headers, err := req.C.decoder.ReadHeaderBlock(req.s)
+	t, f, r, err := req.s.ReadFrame()
+	if err != nil || t != frameHeaders || f != 0 {
+		req.s.abort()
+		return
+	}
+
+	headers, err := req.C.decoder.ReadHeaderBlock(r)
 	if err != nil {
 		req.s.abort()
 		return
 	}
+
 	req.Headers = headers
 	requests <- req
 	err = req.read(req.s, func(t FrameType, f byte, r io.Reader) error {

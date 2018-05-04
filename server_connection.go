@@ -28,7 +28,7 @@ func newServerConnection(mwc *mw.Connection, config *Config, requests chan<- *Se
 		},
 		maxPushID: 0,
 	}
-	go hq.Init(hq)
+	hq.Init(hq)
 	go hq.serviceRequests(requests)
 	return hq
 }

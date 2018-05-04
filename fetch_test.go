@@ -45,6 +45,7 @@ func TestFetch(t *testing.T) {
 	serverResponse, err := serverRequest.Respond(200,
 		hc.HeaderField{Name: "Content-Type", Value: "text/plain"})
 	assert.Nil(t, err)
+	println("response headers out")
 	_, err = io.Copy(serverResponse, strings.NewReader("Hello World"))
 	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())

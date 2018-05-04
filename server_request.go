@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"strconv"
 
 	"github.com/martinthomson/minhq/hc"
 )
@@ -61,7 +62,7 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 	s FrameWriteCloser, push *ServerPushRequest) (*ServerResponse, error) {
 	allHeaders := append([]hc.HeaderField{
-		hc.HeaderField{Name: ":status", Value: string(statusCode)},
+		hc.HeaderField{Name: ":status", Value: strconv.Itoa(statusCode)},
 	}, headers...)
 
 	err := writeHeaderBlock(req.C.encoder, req.C.headersStream, s, req.requestID, allHeaders)

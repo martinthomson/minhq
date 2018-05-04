@@ -1,6 +1,8 @@
 package minhq
 
 import (
+	"encoding/hex"
+	"fmt"
 	"bytes"
 	"errors"
 	"io"
@@ -34,10 +36,13 @@ func writeHeaderBlock(encoder *hc.QcramEncoder, headersStream FrameWriter, reque
 	if err != nil {
 		return err
 	}
-	_, err = headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
-	if err != nil {
-		return err
+	if controlBuf.Len() > 0 {
+		_, err = headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
+		if err != nil {
+			return err
+		}
 	}
+	fmt.Println("Header block: ", hex.EncodeToString(headerBuf.Bytes()))
 	_, err = requestStream.WriteFrame(frameHeaders, 0, headerBuf.Bytes())
 	return err
 }
@@ -69,9 +74,18 @@ func newIncomingMessage(decoder *hc.QcramDecoder, headers []hc.HeaderField) Inco
 }
 
 func (msg *IncomingMessage) read(fr FrameReader, frameHandler incomingMessageFrameHandler) error {
+	defer close(msg.trailers)
+	defer msg.concatenatingReader.Close()
+
 	done := false
-	var err error
-	for t, f, r, err := fr.ReadFrame(); err == nil; {
+	for {
+		t, f, r, err := fr.ReadFrame()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
 		if done {
 			return ErrInvalidFrame
 		}
@@ -86,7 +100,6 @@ func (msg *IncomingMessage) read(fr FrameReader, frameHandler incomingMessageFra
 				return err
 			}
 			msg.trailers <- headers
-			close(msg.trailers)
 		default:
 			err := frameHandler(t, f, r)
 			if err != nil {
@@ -94,12 +107,6 @@ func (msg *IncomingMessage) read(fr FrameReader, frameHandler incomingMessageFra
 			}
 		}
 	}
-	if err == io.EOF {
-		close(msg.trailers)
-		msg.concatenatingReader.Close()
-		return nil
-	}
-	return err
 }
 
 // GetHeader performs a case-insensitive lookup for a given name.
@@ -183,8 +190,16 @@ func newOutgoingMessage(c *connection, s FrameWriteCloser, requestID *requestID,
 
 var _ io.WriteCloser = &OutgoingMessage{}
 
+// Write fulfils the io.Writer contract.
 func (msg *OutgoingMessage) Write(p []byte) (int, error) {
-	return msg.writeStream.WriteFrame(frameData, 0, p)
+	// Note that WriteFrame always uses the entire input array, so it reports how much
+	// it wrote, not how much it used.  It always uses the entire input array.  That's
+	// not the io.Writer contract.
+	_, err := msg.writeStream.WriteFrame(frameData, 0, p)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 // End closes out the stream, writing any trailers that might be included.

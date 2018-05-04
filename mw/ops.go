@@ -154,7 +154,7 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 			}
 			delete(op.c.readState, op.s.minq)
 		}
-		op.result <- op.s.StopSending(op.code)
+		op.result <- op.s.minq.StopSending(op.code)
 
 	case *Packet:
 		packetHandler(op)

@@ -18,6 +18,7 @@ type serverArguments struct {
 
 type clientArguments struct {
 	URLs []string
+	File string
 }
 
 type commonFlags struct {
@@ -42,28 +43,41 @@ func (a *commandLine) exit(msg string) {
 	os.Exit(2)
 }
 
-func (a *commandLine) parseServer(args []string) {
+func (a *commandLine) parseServer(params []string) {
 	a.usage = "server <address:port> <cert> <key>"
-	if len(args) < 3 {
+	if len(params) < 3 {
 		a.exit("missing arguments")
 	}
-	a.args = &serverArguments{args[0], args[1], args[2]}
+	a.args = &serverArguments{params[0], params[1], params[2]}
 }
 
-func (a *commandLine) parseClient(args []string) {
+func (a *commandLine) parseClient(params []string) {
 	a.usage = "client <URL>"
-	if len(args) < 1 {
+	if len(params) < 1 {
 		a.exit("missing arguments")
 	}
-	a.args = &clientArguments{args}
+
+	var args clientArguments
+	fs := flag.NewFlagSet(a.fs.Name()+" client", flag.ExitOnError)
+	fs.Usage = func() {
+		a.print("Usage: %s [...] client [flags] <url> [url [...]]")
+		fs.PrintDefaults()
+	}
+	fs.StringVar(&args.File, "d", "", "read request body from file")
+	fs.Parse(params)
+	args.URLs = fs.Args()
+	a.args = &args
 }
 
 func (a *commandLine) Parse() {
 	a.fs.Init(os.Args[0], flag.ExitOnError)
 
-	a.usage = "server|client <args...>"
 	a.fs.Usage = func() {
-		a.print("Usage: %s [flags] %s", a.fs.Name(), a.usage)
+		a.print("Usage: %s [common options] <command> [args...]", a.fs.Name())
+		a.print("Commands:")
+		a.print("    client - Make a request")
+		a.print("    server - Run a server")
+		a.print("Common Options:")
 		a.fs.PrintDefaults()
 	}
 
@@ -112,13 +126,21 @@ func runClient(common *commonFlags, args *clientArguments) {
 		if err != nil {
 			die("creating fetch", err)
 		}
-		go func() {
-			defer request.Close()
-			_, err := io.Copy(request, os.Stdin)
-			if err != nil {
-				die("sending request body", err)
-			}
-		}()
+		if args.File != "" {
+			go func() {
+				defer request.Close()
+				inputFile, err := os.Open(args.File)
+				if err != nil {
+					die("opening input file: "+args.File, err)
+				}
+				_, err = io.Copy(request, inputFile)
+				if err != nil {
+					die("sending request body", err)
+				}
+			}()
+		} else {
+			request.Close()
+		}
 
 		response := <-request.Response
 		fmt.Println(response)
@@ -147,7 +169,7 @@ func runServer(common *commonFlags, args *serverArguments) {
 		req := <-server.Requests
 
 		// This handles just one request at a time.
-		resp, err := req.Respond(200, hc.HeaderField{Name: "User-Agent", Value: "hq"})
+		resp, err := req.Respond(200, hc.HeaderField{Name: "Server", Value: "hq"})
 		if err != nil {
 			req.C.Close()
 			continue
@@ -155,13 +177,14 @@ func runServer(common *commonFlags, args *serverArguments) {
 
 		multi := io.MultiWriter(os.Stdout, resp)
 		fmt.Fprintf(multi, req.String())
-		fmt.Println("[[[")
+		fmt.Fprintln(multi)
+		fmt.Fprintln(multi, "[[[")
 		_, err = io.Copy(multi, req)
 		if err != nil {
 			req.C.Close()
 			continue
 		}
-		fmt.Println("]]]")
+		fmt.Fprintln(multi, "]]]")
 		err = resp.Close()
 		if err != nil {
 			req.C.Close()

@@ -61,6 +61,24 @@ func (a headerFieldArray) String() string {
 	return s
 }
 
+// GetHeader performs a case-insensitive lookup for a given name.
+// This returns an empty string if the header field wasn't present.
+// Multiple values are concatenated using commas.
+func (a headerFieldArray) GetHeader(n string) string {
+	v := ""
+	for _, h := range a {
+		// Incoming messages have all lowercase names.
+		if h.Name == strings.ToLower(n) {
+			if len(v) > 0 {
+				v += "," + h.Value
+			} else {
+				v = h.Value
+			}
+		}
+	}
+	return v
+}
+
 type incomingMessageFrameHandler func(FrameType, byte, io.Reader) error
 
 // IncomingMessage is the common parts of inbound messages (requests for
@@ -128,18 +146,7 @@ func (msg *IncomingMessage) read(fr FrameReader, frameHandler incomingMessageFra
 // This returns an empty string if the header field wasn't present.
 // Multiple values are concatenated using commas.
 func (msg *IncomingMessage) GetHeader(n string) string {
-	v := ""
-	for _, h := range msg.Headers {
-		// Incoming messages have all lowercase names.
-		if h.Name == strings.ToLower(n) {
-			if len(v) > 0 {
-				v += "," + h.Value
-			} else {
-				v = h.Value
-			}
-		}
-	}
-	return v
+	return msg.Headers.GetHeader(n)
 }
 
 // String just formats headers.

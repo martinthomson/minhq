@@ -1,8 +1,6 @@
 package mw
 
 import (
-	"encoding/hex"
-	"fmt"
 	"net"
 	"time"
 
@@ -16,34 +14,15 @@ type Packet struct {
 	Data       []byte
 }
 
-type readState struct {
-	readable bool
-	reader   *readRequest
-}
-
-func (state *readState) readFrom(minqs minq.RecvStream) {
-	if state.reader == nil || !state.readable {
-		return // noop
-	}
-	n, err := minqs.Read(state.reader.p)
-	if err == minq.ErrorWouldBlock {
-		fmt.Printf("Read from stream %d blocked\n", minqs.Id())
-		state.readable = false
-		return // That blocked.  Leave the reader in place.
-	}
-	fmt.Printf("Read from stream %d: %v\n", minqs.Id(), hex.EncodeToString(state.reader.p))
-	state.reader.result <- &ioResult{n, err}
-	state.reader = nil
-}
-
 // Connection is an async wrapper around minq.Connection
 type Connection struct {
 	minq *minq.Connection
 
 	// Connected produces this connection when the connection is established.
-	Connected <-chan *Connection
-	connected chan<- *Connection
-	closed    chan struct{}
+	Connected    <-chan struct{}
+	wasConnected bool
+	connected    chan<- struct{}
+	closed       chan struct{}
 	// RemoteStreams is an unbuffered channel of streams created by a peer.
 	RemoteStreams <-chan minq.Stream
 	remoteStreams chan<- minq.Stream
@@ -53,12 +32,12 @@ type Connection struct {
 	// IncomingPackets are packets that arrive at the connection.
 	IncomingPackets chan<- *Packet
 
-	readState map[minq.RecvStream]*readState
+	readState map[minq.RecvStream]*readRequest
 	ops       connectionOperations
 }
 
 func newConnection(mc *minq.Connection, ops connectionOperations) *Connection {
-	connected := make(chan *Connection)
+	connected := make(chan struct{})
 	streams := make(chan minq.Stream)
 	recvStreams := make(chan minq.RecvStream)
 	c := &Connection{
@@ -71,7 +50,7 @@ func newConnection(mc *minq.Connection, ops connectionOperations) *Connection {
 		RemoteRecvStreams: recvStreams,
 		remoteRecvStreams: recvStreams,
 
-		readState: make(map[minq.RecvStream]*readState),
+		readState: make(map[minq.RecvStream]*readRequest),
 		ops:       ops,
 	}
 	mc.SetHandler(c)
@@ -127,7 +106,9 @@ func (c *Connection) service() {
 
 func (c *Connection) cleanup() {
 	c.ops.Close()
-	close(c.connected)
+	if !c.wasConnected {
+		close(c.connected)
+	}
 	close(c.remoteStreams)
 }
 
@@ -139,7 +120,8 @@ func (c *Connection) StateChanged(s minq.State) {
 	go func() {
 		switch s {
 		case minq.StateEstablished:
-			c.connected <- c
+			c.wasConnected = true
+			close(c.connected)
 		case minq.StateClosed, minq.StateError:
 			close(c.closed)
 		}
@@ -162,28 +144,25 @@ func (c *Connection) NewRecvStream(s minq.RecvStream) {
 
 // StreamReadable is required by the minq.ConnectionHandler interface.
 func (c *Connection) StreamReadable(s minq.RecvStream) {
-	fmt.Printf("Readable stream %v\n", s.Id())
-	state := c.readState[s]
-	if state == nil {
-		state = &readState{true, nil}
-		c.readState[s] = state
-	} else {
-		state.readable = true
+	req := c.readState[s]
+	if req == nil {
+		return
 	}
-	state.readFrom(s)
+
+	delete(req.c.readState, req.s.minq)
+	if !req.read() {
+		panic("read failed after readable event")
+	}
 }
 
 func (c *Connection) handleReadRequest(req *readRequest) {
-	state := c.readState[req.s.minq]
-	if state == nil {
-		state = &readState{false, req}
-		c.readState[req.s.minq] = state
-	} else if state.reader == nil {
-		state.reader = req
-	} else {
-		panic("Concurrent reads from the same stream")
+	if c.readState[req.s.minq] != nil {
+		panic("someone else is waiting on a read")
 	}
-	state.readFrom(req.s.minq)
+
+	if !req.read() {
+		c.readState[req.s.minq] = req
+	}
 }
 
 // GetState returns the current connection of the connection.

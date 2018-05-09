@@ -1,8 +1,6 @@
 package mw
 
 import (
-	"encoding/hex"
-	"fmt"
 	"errors"
 	"sync/atomic"
 
@@ -56,6 +54,15 @@ type writeRequest struct {
 type readRequest struct {
 	ioRequest
 	s *RecvStream
+}
+
+func (req *readRequest) read() bool {
+	n, err := req.s.minq.Read(req.p)
+	success := err != minq.ErrorWouldBlock
+	if success {
+		req.result <- &ioResult{n, err}
+	}
+	return success
 }
 
 type resetRequest struct {
@@ -127,7 +134,6 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 
 	case *writeRequest:
 		n, err := op.s.minq.Write(op.p)
-		fmt.Printf("Write on stream %v: %v\n", op.s.Id(), hex.EncodeToString(op.p))
 		op.result <- &ioResult{n, err}
 
 	case *closeStreamRequest:
@@ -147,11 +153,9 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 
 		// Note that closing the channel shouldn't be necessary, but caution is
 		// always welcome in these matters.
-		state := op.c.readState[op.s.minq]
-		if state != nil {
-			if state.reader != nil {
-				close(state.reader.result)
-			}
+		readReq := op.c.readState[op.s.minq]
+		if readReq != nil {
+			close(readReq.result)
 			delete(op.c.readState, op.s.minq)
 		}
 		op.result <- op.s.minq.StopSending(op.code)

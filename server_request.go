@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"net/url"
 	"strconv"
 
 	"github.com/martinthomson/minhq/hc"
@@ -14,6 +15,8 @@ type ServerRequest struct {
 	C         *ServerConnection
 	s         *stream
 	ID        uint64
+	Method    string
+	Target    url.URL
 	requestID *requestID // for tracking outstanding header fields
 	IncomingMessage
 }
@@ -23,6 +26,8 @@ func newServerRequest(c *ServerConnection, s *stream) *ServerRequest {
 		C:               c,
 		s:               s,
 		ID:              0,
+		Method:          "",
+		Target:          url.URL{},
 		requestID:       c.nextRequestID(),
 		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
 	}
@@ -48,7 +53,7 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 		return
 	}
 
-	req.Headers = headers
+	req.setHeaders(headers)
 	requests <- req
 	err = req.read(req.s, func(t FrameType, f byte, r io.Reader) error {
 		return ErrUnsupportedFrame
@@ -57,6 +62,40 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 		req.s.abort()
 		return
 	}
+}
+
+func (req *ServerRequest) setHeaders(headers []hc.HeaderField) error {
+	req.Headers = headers
+
+	req.Method = req.GetHeader(":method")
+	if req.Method == "" {
+		return errors.New("Missing :method from request")
+	}
+
+	u := url.URL{
+		Scheme: req.GetHeader(":scheme"),
+		Host:   req.GetHeader(":authority"),
+	}
+	if u.Scheme == "" {
+		return errors.New("Missing :scheme from request")
+	}
+	if u.Host == "" {
+		u.Host = req.GetHeader("Host")
+	}
+	if u.Host == "" {
+		return errors.New("Missing :authority/Host from request")
+	}
+	p := req.GetHeader(":path")
+	if p == "" {
+		return errors.New("Missing :path from request")
+	}
+	// Let url.Parse() handle all the nasty corner cases in path syntax.
+	withPath, err := u.Parse(p)
+	if err != nil {
+		return err
+	}
+	req.Target = *withPath
+	return nil
 }
 
 func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
@@ -78,7 +117,7 @@ func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 }
 
 // Respond creates a response, starting by writing the response header block.
-func (req *ServerRequest) Respond(statusCode int, headers... hc.HeaderField) (*ServerResponse, error) {
+func (req *ServerRequest) Respond(statusCode int, headers ...hc.HeaderField) (*ServerResponse, error) {
 	return req.sendResponse(statusCode, headers, req.s, nil)
 }
 

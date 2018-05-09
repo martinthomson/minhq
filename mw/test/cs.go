@@ -1,8 +1,6 @@
 package test
 
 import (
-	"encoding/hex"
-	"fmt"
 	"net"
 
 	"github.com/ekr/minq"
@@ -20,7 +18,6 @@ type Transport struct {
 
 // Send adds to the write side of this transport.
 func (t *Transport) Send(p []byte) error {
-	fmt.Printf("Transport.Send: %v\n", hex.EncodeToString(p))
 	t.write <- p
 	return nil
 }
@@ -29,12 +26,10 @@ func (t *Transport) Send(p []byte) error {
 // packets it maintains and passes those to the provided channel.
 func (t *Transport) Service(addr *net.UDPAddr, c chan<- *mw.Packet) {
 	for {
-		p, ok := <-t.read
-		if !ok {
-			fmt.Printf("Transport.Service done\n")
+		p := <-t.read
+		if p == nil {
 			return
 		}
-		fmt.Printf("Transport.Service: %v\n", hex.EncodeToString(p))
 		c <- &mw.Packet{RemoteAddr: addr, Data: p}
 	}
 }
@@ -83,18 +78,13 @@ func NewClientServerPair(runServerFunc func(*minq.Server) *mw.Server,
 	cs.ClientConnection = mw.NewConnection(minq.NewConnection(cs.clientTransport, minq.RoleClient, &clientConfig, nil))
 	go cs.clientTransport.Service(serverAddr, cs.ClientConnection.IncomingPackets)
 
-	clientConnected := <-cs.ClientConnection.Connected
-	if cs.ClientConnection != clientConnected {
-		cs.Close()
-		panic("got a different client connection at the server")
-	}
-	
 	if getServerConnectionFunc == nil {
 		getServerConnectionFunc = func(s *mw.Server) *mw.Connection {
 			return <-s.Connections
 		}
 	}
 
+	<-cs.ClientConnection.Connected
 	cs.ServerConnection = getServerConnectionFunc(cs.Server)
 	return cs
 }

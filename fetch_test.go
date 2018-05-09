@@ -27,17 +27,16 @@ func TestFetch(t *testing.T) {
 		return &serverConnection.Connection
 	})
 
+	url := "https://example.com/%2fhello"
 	clientConnection := minhq.NewClientConnection(cs.ClientConnection, config)
-	clientRequest, err := clientConnection.Fetch("GET", "https://example.com/hello",
+	clientRequest, err := clientConnection.Fetch("GET", url,
 		hc.HeaderField{Name: "User-Agent", Value: "Test"})
 	assert.Nil(t, err)
 	assert.Nil(t, clientRequest.Close())
 
-	println("request out")
-
 	serverRequest := <-server.Requests
 	assert.Equal(t, "Test", serverRequest.GetHeader("user-AGENT"))
-	// TODO get a reconstructed URL from the request
+	assert.Equal(t, url, serverRequest.Target.String())
 	_, err = io.Copy(ioutil.Discard, serverRequest)
 	assert.Nil(t, err)
 	assert.Nil(t, <-serverRequest.Trailers)
@@ -45,7 +44,6 @@ func TestFetch(t *testing.T) {
 	serverResponse, err := serverRequest.Respond(200,
 		hc.HeaderField{Name: "Content-Type", Value: "text/plain"})
 	assert.Nil(t, err)
-	println("response headers out")
 	_, err = io.Copy(serverResponse, strings.NewReader("Hello World"))
 	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())

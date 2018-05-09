@@ -3,6 +3,7 @@ package minhq
 import (
 	"errors"
 
+	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/hc"
 	"github.com/martinthomson/minhq/mw"
 )
@@ -21,9 +22,8 @@ func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 	hq := &ClientConnection{
 		connection: connection{
 			Connection: *mwc,
-
-			decoder: hc.NewQcramDecoder(config.DecoderTableCapacity),
-			encoder: hc.NewQcramEncoder(0, 0),
+			decoder:    hc.NewQcramDecoder(config.DecoderTableCapacity),
+			encoder:    hc.NewQcramEncoder(0, 0),
 		},
 	}
 	hq.Init(hq)
@@ -37,6 +37,11 @@ func (c *ClientConnection) HandleFrame(t FrameType, f byte, r FrameReader) error
 
 // Fetch makes a request.
 func (c *ClientConnection) Fetch(method string, target string, headers ...hc.HeaderField) (*ClientRequest, error) {
+	<-c.Connected
+	if c.GetState() != minq.StateEstablished {
+		return nil, errors.New("connection not open")
+	}
+
 	allHeaders, err := buildRequestHeaderFields(method, target, headers)
 	if err != nil {
 		return nil, err
@@ -62,7 +67,7 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 		Response:        responseChannel,
 		OutgoingMessage: newOutgoingMessage(&c.connection, s, requestID, allHeaders),
 	}
-	go req.readResponse(s, c, responseChannel)
 
+	go req.readResponse(s, c, responseChannel)
 	return req, nil
 }

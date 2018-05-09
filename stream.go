@@ -37,7 +37,6 @@ type sendStream struct {
 var _ minq.SendStream = &sendStream{}
 
 func newSendStream(s minq.SendStream) *sendStream {
-	s.Write([]byte{})
 	return &sendStream{NewFrameWriter(s), s}
 }
 

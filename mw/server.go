@@ -1,8 +1,6 @@
 package mw
 
 import (
-	"encoding/hex"
-	"fmt"
 	"time"
 
 	"github.com/ekr/minq"
@@ -32,7 +30,8 @@ type serverHandler struct {
 func (sh *serverHandler) NewConnection(mc *minq.Connection) {
 	go func() {
 		c := newServerConnection(mc, sh.ops)
-		sh.connections <- <-c.Connected
+		<-c.Connected
+		sh.connections <- c
 	}()
 }
 
@@ -62,7 +61,6 @@ func (s *Server) service() {
 		select {
 		case op := <-s.ops.ch:
 			s.ops.Handle(op, func(p *Packet) {
-				fmt.Println("Feeding packet to server", hex.EncodeToString(p.Data))
 				_, _ = s.s.Input(p.RemoteAddr, p.Data)
 			})
 

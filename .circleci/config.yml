@@ -2,9 +2,9 @@ version: 2
 jobs:
   build:
     docker:
-      - image: circleci/golang:1.9
+      - image: circleci/golang:1.10
     working_directory: /go/src/github.com/martinthomson/minhq
     steps:
       - checkout
       - run: go get -v -t -d ./...
-      - run: go test -v -race ./...
+      - run: go test -v ./...

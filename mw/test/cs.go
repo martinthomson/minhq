@@ -30,7 +30,7 @@ func (t *Transport) Service(addr *net.UDPAddr, c chan<- *mw.Packet) {
 		if p == nil {
 			return
 		}
-		c <- &mw.Packet{RemoteAddr: addr, Data: p}
+		c <- &mw.Packet{SrcAddr: addr, Data: p}
 	}
 }
 

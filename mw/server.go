@@ -61,7 +61,7 @@ func (s *Server) service() {
 		select {
 		case op := <-s.ops.ch:
 			s.ops.Handle(op, func(p *Packet) {
-				_, _ = s.s.Input(p.RemoteAddr, p.Data)
+				_, _ = s.s.Input(p.SrcAddr, p.Data)
 			})
 
 		case <-ticker.C:

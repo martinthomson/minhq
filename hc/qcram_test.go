@@ -87,12 +87,9 @@ func setupEncoder(t *testing.T, encoder *hc.QcramEncoder) {
 	// And two references.
 	assert.Equal(t, []byte{0x02, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
-	checkDynamicTable(t, encoder.Table, &tableState{
-		size: 86,
-		entries: []tableStateEntry{
-			{"name2", "value2"},
-			{"name1", "value1"},
-		},
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name2", "value2"},
+		{"name1", "value1"},
 	})
 }
 
@@ -135,14 +132,11 @@ func TestQcramDuplicate(t *testing.T) {
 
 	assert.Equal(t, []byte{0x04, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
-	checkDynamicTable(t, encoder.Table, &tableState{
-		size: 172,
-		entries: []tableStateEntry{
-			{"name1", "value1"},
-			{"name0", "value0"},
-			{"name2", "value2"},
-			{"name1", "value1"},
-		},
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name1", "value1"},
+		{"name0", "value0"},
+		{"name2", "value2"},
+		{"name1", "value1"},
 	})
 
 	assertQcramTableFull(t, encoder)
@@ -173,13 +167,10 @@ func TestQcramDuplicateLiteral(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	checkDynamicTable(t, encoder.Table, &tableState{
-		size: 129,
-		entries: []tableStateEntry{
-			{"name0", "value0"},
-			{"name2", "value2"},
-			{"name1", "value1"},
-		},
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name0", "value0"},
+		{"name2", "value2"},
+		{"name1", "value1"},
 	})
 
 	assertQcramTableFull(t, encoder)
@@ -207,13 +198,10 @@ func TestQcramNameReference(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	checkDynamicTable(t, encoder.Table, &tableState{
-		size: 129,
-		entries: []tableStateEntry{
-			{"name1", "value9"},
-			{"name2", "value2"},
-			{"name1", "value1"},
-		},
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name1", "value9"},
+		{"name2", "value2"},
+		{"name1", "value1"},
 	})
 }
 
@@ -238,12 +226,9 @@ func TestNotIndexedNameReference(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	checkDynamicTable(t, encoder.Table, &tableState{
-		size: 86,
-		entries: []tableStateEntry{
-			{"name2", "value2"},
-			{"name1", "value1"},
-		},
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name2", "value2"},
+		{"name1", "value1"},
 	})
 
 	// Even after acknowledging the header block from setup, the reference to the

@@ -110,11 +110,8 @@ func TestHpackEviction(t *testing.T) {
 		{Name: "one", Value: "1", Sensitive: false},
 		{Name: "two", Value: "2", Sensitive: false},
 	}
-	dynamicTable := &tableState{
-		size: 36,
-		entries: []tableStateEntry{
-			{"two", "2"},
-		},
+	dynamicTable := &[]dynamicTableEntry{
+		{"two", "2"},
 	}
 
 	encoder := hc.NewHpackEncoder(0)

@@ -22,8 +22,6 @@ func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 	hq := &ClientConnection{
 		connection: connection{
 			Connection: *mwc,
-			decoder:    hc.NewQpackDecoder(config.DecoderTableCapacity),
-			encoder:    hc.NewQpackEncoder(0, 0),
 		},
 	}
 	hq.Init(hq)
@@ -47,25 +45,20 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 		return nil, err
 	}
 
-	requestID := c.nextRequestID()
 	s := newStream(c.CreateStream())
 	if s == nil {
 		return nil, ErrStreamBlocked
-	}
-	_, err = s.WriteVarint(requestID.id)
-	if err != nil {
-		return nil, err
-	}
-
-	err = writeHeaderBlock(c.encoder, c.headersStream, s, requestID, allHeaders)
-	if err != nil {
-		return nil, err
 	}
 
 	responseChannel := make(chan *ClientResponse)
 	req := &ClientRequest{
 		Response:        responseChannel,
-		OutgoingMessage: newOutgoingMessage(&c.connection, s, requestID, allHeaders),
+		OutgoingMessage: newOutgoingMessage(&c.connection, &s.sendStream, allHeaders),
+	}
+
+	err = req.writeHeaderBlock(allHeaders)
+	if err != nil {
+		return nil, err
 	}
 
 	go req.readResponse(s, c, responseChannel)

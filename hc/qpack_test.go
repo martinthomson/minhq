@@ -11,21 +11,47 @@ import (
 	"github.com/stvp/assert"
 )
 
+func checkExpectedUpdates(t *testing.T, updateBuf *bytes.Buffer, expectedHex string) {
+	expectedUpdates, err := hex.DecodeString(expectedHex)
+	assert.Nil(t, err)
+	if len(expectedUpdates) == 0 {
+		// updateBuf.Bytes() returns nil if it hasn't been written to yet. meh.
+		assert.Equal(t, 0, updateBuf.Len())
+		return
+	}
+
+	// Remove and check the length that precedes the table updates.
+	intReader := hc.NewReader(updateBuf)
+	// Read the length.
+	length, err := intReader.ReadInt(8)
+	assert.Nil(t, err)
+	// Pull that many octets from the buffer.
+	contents := updateBuf.Next(int(length))
+	assert.Equal(t, int(length), len(contents))
+	// Check that there is no remaining data.
+	_, err = updateBuf.ReadByte()
+	assert.Equal(t, err, io.EOF)
+	// Finally, check that the octets are correct.
+	assert.Equal(t, expectedUpdates, contents)
+}
+
 func TestQpackEncoder(t *testing.T) {
 	var encoder *hc.QpackEncoder
-	token := "k"
+	id := uint64(3456789)
+	var updateBuf bytes.Buffer
 
 	for _, tc := range testCases {
 		if tc.resetTable {
 			t.Log("Reset encoder")
-			encoder = hc.NewQpackEncoder(256, 0)
+			encoder = hc.NewQpackEncoder(&updateBuf, 256, 0)
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
 		} else {
-			// We can use the same token here because always acknowledge before encoding
+			// We can use the same id here because always acknowledge before encoding
 			// the next block.
-			encoder.AcknowledgeHeader(token)
+			encoder.AcknowledgeHeader(id)
 		}
+		updateBuf.Reset()
 
 		if tc.huffman {
 			encoder.HuffmanPreference = hc.HuffmanCodingAlways
@@ -38,23 +64,15 @@ func TestQpackEncoder(t *testing.T) {
 			t.Logf("  %v", h)
 		}
 
-		var controlBuf bytes.Buffer
 		var headerBuf bytes.Buffer
-		err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, tc.headers...)
+		err := encoder.WriteHeaderBlock(&headerBuf, id, tc.headers...)
 		assert.Nil(t, err)
-		t.Logf("Inserts:  %x", controlBuf.Bytes())
-		t.Logf("Expected: %v", tc.qpackControl)
+		t.Logf("Inserts:  %x", updateBuf.Bytes())
+		t.Logf("Expected: %v", tc.qpackUpdates)
 		t.Logf("Header Block: %x", headerBuf.Bytes())
 		t.Logf("Expected:     %v", tc.qpackHeader)
 
-		expectedControl, err := hex.DecodeString(tc.qpackControl)
-		assert.Nil(t, err)
-		if len(expectedControl) == 0 {
-			// controlBuf.Bytes() returns nil if it hasn't been written to yet. meh.
-			assert.Equal(t, 0, controlBuf.Len())
-		} else {
-			assert.Equal(t, expectedControl, controlBuf.Bytes())
-		}
+		checkExpectedUpdates(t, &updateBuf, tc.qpackUpdates)
 
 		expectedHeader, err := hex.DecodeString(tc.qpackHeader)
 		assert.Nil(t, err)
@@ -68,22 +86,23 @@ func TestQpackEncoder(t *testing.T) {
 	}
 }
 
+const setupToken = uint64(53709)
+
 // This writes two simple header fields to the provided encoder. Note that this
 // doesn't acknowledge that header block, so these will be pinned in the table
 // until that can happen.
-func setupEncoder(t *testing.T, encoder *hc.QpackEncoder) {
-	var controlBuf bytes.Buffer
+func setupEncoder(t *testing.T, encoder *hc.QpackEncoder, updateBuf *bytes.Buffer) {
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "setup",
+	err := encoder.WriteHeaderBlock(&headerBuf, setupToken,
 		hc.HeaderField{Name: "name1", Value: "value1"},
 		hc.HeaderField{Name: "name2", Value: "value2"})
 	assert.Nil(t, err)
-	t.Logf("Setup Table: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Setup Table: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	// We should see inserts here.
-	expectedControl, err := hex.DecodeString("64a874943f85ee3a2d287f64a874945f85ee3a2d28bf")
+	expectedUpdate, err := hex.DecodeString("1664a874943f85ee3a2d287f64a874945f85ee3a2d28bf")
 	assert.Nil(t, err)
-	assert.Equal(t, expectedControl, controlBuf.Bytes())
+	assert.Equal(t, expectedUpdate, updateBuf.Bytes())
 	// And two references.
 	assert.Equal(t, []byte{0x02, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
@@ -91,44 +110,47 @@ func setupEncoder(t *testing.T, encoder *hc.QpackEncoder) {
 		{"name2", "value2"},
 		{"name1", "value1"},
 	})
+
+	updateBuf.Reset()
 }
 
 // Attempt to write to the table.  Only literals should be produced.
-func assertQpackTableFull(t *testing.T, encoder *hc.QpackEncoder) {
-	var controlBuf bytes.Buffer
-	var headerBuf bytes.Buffer
+func assertQpackTableFull(t *testing.T, encoder *hc.QpackEncoder, updateBuf *bytes.Buffer) {
+	updateBuf.Reset()
 
-	token := "full"
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token,
+	fullToken := uint64(890346979)
+	var headerBuf bytes.Buffer
+	err := encoder.WriteHeaderBlock(&headerBuf, fullToken,
 		hc.HeaderField{Name: "namef", Value: "valuef"})
 	assert.Nil(t, err)
-	t.Logf("Table Full: [%x] %x", controlBuf.Bytes(), headerBuf.Bytes())
-	assert.Equal(t, 0, controlBuf.Len())
+	t.Logf("Table Full: [%x] %x", updateBuf.Bytes(), headerBuf.Bytes())
+	assert.Equal(t, 0, updateBuf.Len())
 
 	expectedHeader, err := hex.DecodeString("00006ca874965f85ee3a2d2cbf")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	encoder.AcknowledgeHeader(token)
+	encoder.AcknowledgeHeader(fullToken)
 }
 
+const defaultToken = uint64(12345)
+
 func TestQpackDuplicate(t *testing.T) {
-	encoder := hc.NewQpackEncoder(200, 100)
+	var updateBuf bytes.Buffer
+	encoder := hc.NewQpackEncoder(&updateBuf, 200, 100)
+	setupEncoder(t, encoder, &updateBuf)
 
-	setupEncoder(t, encoder)
-
-	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
 		hc.HeaderField{Name: "name0", Value: "value0"},
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
-	t.Logf("Force Duplicate: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Force Duplicate: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	// This should include a duplication (that's the 02 on the end).
-	expectedControl, err := hex.DecodeString("64a874941f85ee3a2d283f02")
+	expectedUpdates, err := hex.DecodeString("0c64a874941f85ee3a2d283f02")
 	assert.Nil(t, err)
-	assert.Equal(t, expectedControl, controlBuf.Bytes())
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
 	assert.Equal(t, []byte{0x04, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
@@ -139,29 +161,28 @@ func TestQpackDuplicate(t *testing.T) {
 		{"name1", "value1"},
 	})
 
-	assertQpackTableFull(t, encoder)
+	assertQpackTableFull(t, encoder, &updateBuf)
 }
 
 // TestQpackDuplicateLiteral sets up the conditions for a duplication, but the
 // table is too small to allow it.
 func TestQpackDuplicateLiteral(t *testing.T) {
-	encoder := hc.NewQpackEncoder(150, 50)
+	var updateBuf bytes.Buffer
+	encoder := hc.NewQpackEncoder(&updateBuf, 150, 50)
+	setupEncoder(t, encoder, &updateBuf)
 
-	setupEncoder(t, encoder)
-
-	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
 		hc.HeaderField{Name: "name0", Value: "value0"},
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
-	t.Logf("Force Duplicate: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Force Duplicate: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	// name0:value0 can be added, but there isn't enough room to duplicate
 	// name1:value1, so it uses a literal.
-	expectedControl, err := hex.DecodeString("64a874941f85ee3a2d283f")
+	expectedUpdates, err := hex.DecodeString("0b64a874941f85ee3a2d283f")
 	assert.Nil(t, err)
-	assert.Equal(t, expectedControl, controlBuf.Bytes())
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
 	expectedHeader, err := hex.DecodeString("0300806ca874943f85ee3a2d287f")
 	assert.Nil(t, err)
@@ -173,26 +194,25 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 		{"name1", "value1"},
 	})
 
-	assertQpackTableFull(t, encoder)
+	assertQpackTableFull(t, encoder, &updateBuf)
 }
 
 // Use a name reference and ensure that it can't be evicted.
 func TestQpackNameReference(t *testing.T) {
-	encoder := hc.NewQpackEncoder(150, 0)
+	var updateBuf bytes.Buffer
+	encoder := hc.NewQpackEncoder(&updateBuf, 150, 0)
+	setupEncoder(t, encoder, &updateBuf)
 
-	setupEncoder(t, encoder)
-
-	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
-	t.Logf("Name Reference: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Name Reference: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	// 81 is an insert with a name reference.
-	expectedControl, err := hex.DecodeString("8185ee3a2d2bff")
+	expectedUpdates, err := hex.DecodeString("078185ee3a2d2bff")
 	assert.Nil(t, err)
-	assert.Equal(t, expectedControl, controlBuf.Bytes())
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
 	expectedHeader, err := hex.DecodeString("030080")
 	assert.Nil(t, err)
@@ -207,20 +227,19 @@ func TestQpackNameReference(t *testing.T) {
 
 // This tests that a name reference can be created on a literal.
 func TestNotIndexedNameReference(t *testing.T) {
-	encoder := hc.NewQpackEncoder(100, 0)
-
-	setupEncoder(t, encoder)
+	var updateBuf bytes.Buffer
+	encoder := hc.NewQpackEncoder(&updateBuf, 100, 0)
+	setupEncoder(t, encoder, &updateBuf)
 
 	// Block new table insertions for this key.
 	encoder.SetIndexPreference("name1", false)
-	var controlBuf bytes.Buffer
 	var headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
+	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
-	t.Logf("Non-Indexed Name Reference: [%x] %x", controlBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Non-Indexed Name Reference: [%x] %x", updateBuf.Bytes(), headerBuf.Bytes())
 
-	assert.Equal(t, 0, controlBuf.Len())
+	assert.Equal(t, 0, updateBuf.Len())
 
 	expectedHeader, err := hex.DecodeString("01000085ee3a2d2bff")
 	assert.Nil(t, err)
@@ -233,26 +252,39 @@ func TestNotIndexedNameReference(t *testing.T) {
 
 	// Even after acknowledging the header block from setup, the reference to the
 	// initial name1 entry remains outstanding and blocks eviction.
-	encoder.AcknowledgeHeader("setup")
-	assertQpackTableFull(t, encoder)
+	encoder.AcknowledgeHeader(setupToken)
+	assertQpackTableFull(t, encoder, &updateBuf)
+}
+
+func checkAck(t *testing.T, ackReader *hc.Reader, eb byte, ev uint64) {
+	b, err := ackReader.ReadBit()
+	assert.Nil(t, err)
+	assert.Equal(t, b, eb)
+	v, err := ackReader.ReadInt(7)
+	assert.Equal(t, v, ev)
 }
 
 func TestQpackDecoderOrdered(t *testing.T) {
+	var ackReader *hc.Reader
 	var decoder *hc.QpackDecoder
-
+	tableEntries := 0
+	var token uint64
 	for _, tc := range testCases {
 		if tc.resetTable {
 			t.Log("Reset table")
-			decoder = hc.NewQpackDecoder(256)
+			reader, writer := io.Pipe()
+			ackReader = hc.NewReader(reader)
+			decoder = hc.NewQpackDecoder(writer, 256)
+			tableEntries = 0
 		}
 		t.Logf("Decode:")
 		for _, h := range tc.headers {
 			t.Logf("  %v", h)
 		}
 
-		if len(tc.qpackControl) > 0 {
-			t.Logf("Control: %v", tc.qpackControl)
-			control, err := hex.DecodeString(tc.qpackControl)
+		if len(tc.qpackUpdates) > 0 {
+			t.Logf("Control: %v", tc.qpackUpdates)
+			control, err := hex.DecodeString(tc.qpackUpdates)
 			assert.Nil(t, err)
 			err = decoder.ReadTableUpdates(bytes.NewReader(control))
 			assert.Nil(t, err)
@@ -264,13 +296,21 @@ func TestQpackDecoderOrdered(t *testing.T) {
 		}
 		checkDynamicTable(t, decoder.Table, dynamicTable)
 
+		// There were new entries.  Check that they were acknowledged.
+		if decoder.Table.Base() > tableEntries {
+			checkAck(t, ackReader, 1, uint64(decoder.Table.Base()))
+			tableEntries = decoder.Table.Base()
+		}
+
 		t.Logf("Header: %v", tc.qpackHeader)
 		encoded, err := hex.DecodeString(tc.qpackHeader)
 		assert.Nil(t, err)
-		headers, err := decoder.ReadHeaderBlock(bytes.NewReader(encoded))
+		headers, err := decoder.ReadHeaderBlock(bytes.NewReader(encoded), token)
 		assert.Nil(t, err)
 
 		assert.Equal(t, tc.headers, headers)
+		checkAck(t, ackReader, 0, token)
+		token++
 	}
 }
 
@@ -320,12 +360,13 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 		}
 	}
 
-	for _, tc := range testData {
+	for i, tc := range testData {
 		if tc.resetTable {
 			if controlReader != nil {
 				fin()
 			}
-			decoder = hc.NewQpackDecoder(256)
+			var ackBuf bytes.Buffer
+			decoder = hc.NewQpackDecoder(&ackBuf, 256)
 			controlReader, controlWriter = io.Pipe()
 			go func() {
 				err := decoder.ReadTableUpdates(controlReader)
@@ -341,7 +382,7 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 
 		go func(tc testCase, r io.Reader) {
 			defer headerDone.Done()
-			headers, err := decoder.ReadHeaderBlock(r)
+			headers, err := decoder.ReadHeaderBlock(r, uint64(i))
 			assert.Nil(t, err)
 
 			assert.Equal(t, tc.headers, headers)
@@ -349,9 +390,9 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 
 		// After setting up the header block to decode, feed the control stream to the
 		// reader.  First, wait for the header block reader to take a byte.
-		if len(tc.qpackControl) > 0 {
+		if len(tc.qpackUpdates) > 0 {
 			nr.Wait()
-			controlBytes, err := hex.DecodeString(tc.qpackControl)
+			controlBytes, err := hex.DecodeString(tc.qpackUpdates)
 			assert.Nil(t, err)
 			n, err := controlWriter.Write(controlBytes)
 			assert.Nil(t, err)
@@ -381,7 +422,7 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
 				{Name: "location", Value: "https://www.example.com"},
 			},
-			qpackControl: "",
+			qpackUpdates: "",
 			qpackHeader:  "0300d5828180",
 		},
 		{
@@ -392,7 +433,7 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
 				{Name: "location", Value: "https://www.example.com"},
 			},
-			qpackControl: "f10770726976617465" +
+			qpackUpdates: "f10770726976617465" +
 				"c31d4d6f6e2c203231204f637420323031332032303a31333a323120474d54" + "c91768747470733a2f2f7777772e6578616d706c652e636f6d" +
 				"d503333037",
 			qpackHeader: "040080838281",
@@ -409,7 +450,7 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				{Name: "cache-control", Value: "private"},
 				{Name: "location", Value: "https://www.example.com"},
 			},
-			qpackControl: "",
+			qpackUpdates: "",
 			qpackHeader:  "0200d58180",
 		},
 		{
@@ -419,7 +460,7 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				{Name: "cache-control", Value: "private"},
 				{Name: "location", Value: "https://www.example.com"},
 			},
-			qpackControl: "f10770726976617465" +
+			qpackUpdates: "f10770726976617465" +
 				"c91768747470733a2f2f7777772e6578616d706c652e636f6d" +
 				"d503333037" + "02",
 			qpackHeader: "0400818082",

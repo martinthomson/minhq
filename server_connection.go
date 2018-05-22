@@ -4,7 +4,6 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/martinthomson/minhq/hc"
 	"github.com/martinthomson/minhq/mw"
 )
 
@@ -22,9 +21,6 @@ func newServerConnection(mwc *mw.Connection, config *Config, requests chan<- *Se
 	hq := &ServerConnection{
 		connection: connection{
 			Connection: *mwc,
-
-			decoder: hc.NewQpackDecoder(config.DecoderTableCapacity),
-			encoder: hc.NewQpackEncoder(0, 0),
 		},
 		maxPushID: 0,
 	}

@@ -1,6 +1,7 @@
 package hc
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"strings"
@@ -13,21 +14,77 @@ var ErrTableUpdateInHeaderBlock = errors.New("header table update in header bloc
 // ErrHeaderInTableUpdate shouldn't exist, but this is an early version of QPACK.
 var ErrHeaderInTableUpdate = errors.New("header emission in table update")
 
+// HasIdentity is used for tracking of outstanding header blocks.
+type HasIdentity interface {
+	Id() uint64
+}
+
 // QpackDecoder is the top-level class for header decompression.
 // This is intended to be concurrency-safe for reading of header blocks
 // (ReadHeaderBlock), but the reading of table updates (ReadTableChanges) can
 // only run on one thread at a time.
 type QpackDecoder struct {
 	decoderCommon
-	table *QpackDecoderTable
+	table        *QpackDecoderTable
+	available    chan<- int
+	acknowledged chan<- uint64
 }
 
 // NewQpackDecoder makes and sets up a QpackDecoder.
-func NewQpackDecoder(capacity TableCapacity) *QpackDecoder {
+func NewQpackDecoder(aw io.Writer, capacity TableCapacity) *QpackDecoder {
 	decoder := new(QpackDecoder)
 	decoder.table = NewQpackDecoderTable(capacity)
 	decoder.Table = decoder.table
+	available := make(chan int)
+	decoder.available = available
+	acknowledged := make(chan uint64)
+	decoder.acknowledged = acknowledged
+	go decoder.writeAcknowledgements(aw, available, acknowledged)
 	return decoder
+}
+
+func (decoder *QpackDecoder) writeAcknowledgements(aw io.Writer, entries <-chan int, acknowledged <-chan uint64) {
+	w := NewWriter(aw)
+	for {
+		var v uint64
+		var err error
+		select {
+		case entry := <-entries:
+			err = w.WriteBit(1)
+			v = uint64(entry)
+		case ack := <-acknowledged:
+			err = w.WriteBit(0)
+			v = ack
+		}
+		if err != nil {
+			// TODO: close the connection instead of panicking
+			panic("unable to write acknowledgment")
+			return
+		}
+		err = w.WriteInt(v, 7)
+		if err != nil {
+			panic("unable to write acknowledgment")
+			return
+		}
+	}
+}
+
+// ServiceUpdates reads from the given reader, updating the header table as needed.
+func (decoder *QpackDecoder) ServiceUpdates(hr io.Reader) {
+	r := NewReader(hr)
+	for {
+		blockLen, err := r.ReadInt(8)
+		if err != nil {
+			// TODO report this error
+			return
+		}
+		block := &io.LimitedReader{R: r, N: int64(blockLen)}
+		err = decoder.ReadTableUpdates(block)
+		if err != nil {
+			// TODO report this error
+			return
+		}
+	}
 }
 
 func (decoder *QpackDecoder) readInsertWithNameReference(reader *Reader, base int) error {
@@ -91,7 +148,8 @@ func (decoder *QpackDecoder) readDynamicUpdate(reader *Reader) error {
 	return nil
 }
 
-// ReadTableUpdates reads inserts to the table.
+// ReadTableUpdates reads a single block of table updates.  If you use ServiceUpdates,
+// this function should need to be used at all.
 func (decoder *QpackDecoder) ReadTableUpdates(r io.Reader) error {
 	reader := NewReader(r)
 
@@ -99,6 +157,7 @@ func (decoder *QpackDecoder) ReadTableUpdates(r io.Reader) error {
 		base := decoder.Table.Base()
 		b, err := reader.ReadBit()
 		if err == io.EOF {
+			decoder.available <- base
 			break // Success
 		}
 		if err != nil {
@@ -261,7 +320,7 @@ func (decoder *QpackDecoder) readBase(reader *Reader) (int, error) {
 }
 
 // ReadHeaderBlock decodes header fields as they arrive.
-func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
+func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderField, error) {
 	reader := NewReader(r)
 	base, err := decoder.readBase(reader)
 	if err != nil {
@@ -332,6 +391,7 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 	if err != nil {
 		return nil, err
 	}
+	decoder.acknowledged <- id
 	return headers, nil
 }
 
@@ -348,10 +408,10 @@ type qpackWriterState struct {
 	largestBase  int
 	smallestBase int
 
-	token interface{}
+	uses *qpackHeaderBlockUsage
 }
 
-func (state *qpackWriterState) init(headers []HeaderField, token interface{}) {
+func (state *qpackWriterState) init(headers []HeaderField, uses *qpackHeaderBlockUsage) {
 	state.headers = make([]HeaderField, len(headers))
 	for i, h := range headers {
 		state.headers[i] = HeaderField{strings.ToLower(h.Name), h.Value, h.Sensitive}
@@ -359,7 +419,7 @@ func (state *qpackWriterState) init(headers []HeaderField, token interface{}) {
 	state.matches = make([]Entry, len(headers))
 	state.nameMatches = make([]Entry, len(headers))
 	state.smallestBase = int(^uint(0) >> 1)
-	state.token = token
+	state.uses = uses
 }
 
 func (state *qpackWriterState) updateBase(e Entry, match bool) {
@@ -392,7 +452,7 @@ func (state *qpackWriterState) addUse(i int) {
 	}
 	qe, ok := e.(*qpackEncoderEntry)
 	if ok {
-		qe.addUse(state.token)
+		state.uses.add(qe)
 	}
 }
 
@@ -405,9 +465,14 @@ type QpackEncoder struct {
 	// maxBlockedStreams is the peer's setting for the number of
 	// streams that can be blocked.
 	maxBlockedStreams uint16
-	// acknowledgedEntry is the highest dynamic table entry base
+	// highestAcknowledged is the highest dynamic table entry base
 	// that the peer has acknowledged.
-	acknowledgedEntry int
+	highestAcknowledged int
+
+	// updatesWriter is where header table updates are written
+	updatesWriter *Writer
+
+	usage qpackUsageTracker
 }
 
 // NewQpackEncoder creates a new QpackEncoder and sets it up.
@@ -416,27 +481,52 @@ type QpackEncoder struct {
 // will be referenced, those outside will not be. Set `margin` to a value that
 // is less than capacity. Setting `margin` too low can cause churn, where the
 // encoder will duplicate entries rather than reference them.
-func NewQpackEncoder(capacity TableCapacity, margin TableCapacity) *QpackEncoder {
+func NewQpackEncoder(hw io.Writer, capacity TableCapacity, margin TableCapacity) *QpackEncoder {
 	encoder := new(QpackEncoder)
 	encoder.table = NewQpackEncoderTable(capacity, margin)
 	encoder.Table = encoder.table
+	encoder.updatesWriter = NewWriter(hw)
+	encoder.usage = make(map[uint64][]*qpackHeaderBlockUsage)
 	return encoder
 }
 
+// ServiceAcknowledgments reads from the stream of acknowledgments and feeds those to the encoder.
+func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) {
+	r := NewReader(ar)
+	for {
+		b, err := r.ReadBit()
+		if err != nil {
+			panic("unable to read acknowledgment")
+			return
+		}
+		v, err := r.ReadInt(7)
+		if err != nil {
+			panic("unable to read acknowledgment")
+			return
+		}
+		switch b {
+		case 0:
+			encoder.AcknowledgeHeader(v)
+		case 1:
+			encoder.AcknowledgeInsert(int(v))
+		}
+	}
+}
+
 // writeDuplicate duplicates the indicated entry.
-func (encoder *QpackEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, state *qpackWriterState, i int) error {
+func (encoder *QpackEncoder) writeDuplicate(w *Writer, entry DynamicEntry, state *qpackWriterState, i int) error {
 	inserted := encoder.Table.Insert(entry.Name(), entry.Value(), state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
 		return nil
 	}
 
-	err := writer.WriteBits(0, 3)
+	err := w.WriteBits(0, 3)
 	if err != nil {
 		return err
 	}
 	// Note: subtract 1 from the index to account for the insertion above.
-	err = writer.WriteInt(uint64(encoder.Table.Index(entry)-1), 5)
+	err = w.WriteInt(uint64(encoder.Table.Index(entry)-1), 5)
 	if err != nil {
 		return err
 	}
@@ -448,7 +538,7 @@ func (encoder *QpackEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, 
 
 // writeInsert writes the entry at state.xxx[i] to the control stream.
 // Note that only nameMatch is used for this insertion.
-func (encoder *QpackEncoder) writeInsert(writer *Writer, state *qpackWriterState, i int,
+func (encoder *QpackEncoder) writeInsert(w *Writer, state *qpackWriterState, i int,
 	nameMatch Entry) error {
 	h := state.headers[i]
 	inserted := encoder.Table.Insert(h.Name, h.Value, state)
@@ -468,26 +558,26 @@ func (encoder *QpackEncoder) writeInsert(writer *Writer, state *qpackWriterState
 	} else {
 		instruction = 1
 	}
-	err := writer.WriteBits(instruction, 2)
+	err := w.WriteBits(instruction, 2)
 	if err != nil {
 		return err
 	}
 
 	switch instruction {
 	case 1:
-		err = writer.WriteStringRaw(h.Name, 5, encoder.HuffmanPreference)
+		err = w.WriteStringRaw(h.Name, 5, encoder.HuffmanPreference)
 	case 2:
 		// Dynamic: subtract 1 from the index to account for the insertion above.
-		err = writer.WriteInt(uint64(encoder.Table.Index(nameMatch)-1), 6)
+		err = w.WriteInt(uint64(encoder.Table.Index(nameMatch)-1), 6)
 	case 3:
 		// Static: unmodified index.
-		err = writer.WriteInt(uint64(encoder.Table.Index(nameMatch)), 6)
+		err = w.WriteInt(uint64(encoder.Table.Index(nameMatch)), 6)
 	}
 	if err != nil {
 		return err
 	}
 
-	err = writer.WriteStringRaw(h.Value, 7, encoder.HuffmanPreference)
+	err = w.WriteStringRaw(h.Value, 7, encoder.HuffmanPreference)
 	if err != nil {
 		return err
 	}
@@ -499,8 +589,10 @@ func (encoder *QpackEncoder) writeInsert(writer *Writer, state *qpackWriterState
 
 // writeTableChanges writes out the changes to the header table. It returns the
 // largest value of base that can be used for this to work.
-func (encoder *QpackEncoder) writeTableChanges(controlWriter io.Writer, state *qpackWriterState) error {
-	w := NewWriter(controlWriter)
+func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState) error {
+	// We have to buffer everything here.
+	var buf bytes.Buffer
+	w := NewWriter(&buf)
 
 	// Only one goroutine can update the table at once.
 	defer encoder.mutex.Unlock()
@@ -544,6 +636,17 @@ func (encoder *QpackEncoder) writeTableChanges(controlWriter io.Writer, state *q
 			}
 		} else {
 			state.updateBase(nameMatch, false)
+		}
+	}
+
+	if buf.Len() > 0 {
+		err := encoder.updatesWriter.WriteInt(uint64(buf.Len()), 8)
+		if err != nil {
+			return err
+		}
+		_, err = io.Copy(encoder.updatesWriter, &buf)
+		if err != nil {
+			return err
 		}
 	}
 	return nil
@@ -675,20 +778,20 @@ func (encoder *QpackEncoder) writeHeaderBlock(headerWriter io.Writer, state *qpa
 }
 
 // WriteHeaderBlock writes out a header block.  controlWriter is the control stream writer
-// `token` is a token that is used to identify this header block. The caller
+// `id` is an ID for the stream that this header block relates to. The caller
 // needs to pick a token that is unique among the tokens that are currently
 // unacknowledged. Using the same token twice without first acknowledging it can
 // result in errors.
-func (encoder *QpackEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWriter io.Writer,
-	token interface{}, headers ...HeaderField) error {
+func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
+	id uint64, headers ...HeaderField) error {
 	err := validatePseudoHeaders(headers)
 	if err != nil {
 		return err
 	}
 
 	var state qpackWriterState
-	state.init(headers, token)
-	err = encoder.writeTableChanges(controlWriter, &state)
+	state.init(headers, encoder.usage.make(id))
+	err = encoder.writeTableChanges(&state)
 	if err != nil {
 		return err
 	}
@@ -699,10 +802,10 @@ func (encoder *QpackEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWri
 // Acknowledge is called when a header block has been acknowledged by the peer.
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
-func (encoder *QpackEncoder) AcknowledgeHeader(token interface{}) {
+func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	encoder.table.Acknowledge(token)
+	encoder.usage.ack(id)
 }
 
 // AcknowledgeInsert acknowledges that the remote decoder has received a
@@ -710,8 +813,8 @@ func (encoder *QpackEncoder) AcknowledgeHeader(token interface{}) {
 func (encoder *QpackEncoder) AcknowledgeInsert(base int) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	if base > encoder.acknowledgedEntry {
-		encoder.acknowledgedEntry = base
+	if base > encoder.highestAcknowledged {
+		encoder.highestAcknowledged = base
 	}
 }
 

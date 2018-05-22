@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"io/ioutil"
-	"sync/atomic"
 
 	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/hc"
@@ -45,38 +44,6 @@ type Config struct {
 	DecoderTableCapacity hc.TableCapacity
 }
 
-type outstandingHeaderBlock struct {
-	sent         uint16
-	acknowledged uint16
-}
-
-type outstandingHeaders struct {
-	outstanding map[uint64]*outstandingHeaderBlock
-}
-
-func (oh *outstandingHeaders) add(id *requestID) *requestID {
-	o, ok := oh.outstanding[id.id]
-	if ok {
-		o.sent++
-	} else {
-		o = &outstandingHeaderBlock{1, 0}
-		oh.outstanding[id.id] = o
-	}
-	return &requestID{id.id, o.sent}
-}
-
-func (oh *outstandingHeaders) ack(id uint64) *requestID {
-	o, ok := oh.outstanding[id]
-	if !ok {
-		return nil
-	}
-	o.acknowledged++
-	if o.acknowledged == o.sent {
-		delete(oh.outstanding, id)
-	}
-	return &requestID{id, o.acknowledged}
-}
-
 // FrameHandler is used by subclasses of connection to deal with frames that only they handle.
 type FrameHandler interface {
 	HandleFrame(FrameType, byte, FrameReader) error
@@ -88,13 +55,9 @@ type connection struct {
 	config Config
 	mw.Connection
 
-	decoder         *hc.QpackDecoder
-	encoder         *hc.QpackEncoder
-	controlStream   *sendStream
-	headersStream   *sendStream
-	headerAckStream *sendStream
-	requestID       uint64
-	outstanding     outstandingHeaders
+	decoder       *hc.QpackDecoder
+	encoder       *hc.QpackEncoder
+	controlStream *sendStream
 
 	unknownFrameHandler FrameHandler
 }
@@ -105,27 +68,20 @@ func (c *connection) Init(fh FrameHandler) {
 	c.unknownFrameHandler = fh
 
 	c.controlStream = newSendStream(c.CreateSendStream())
-	c.headersStream = newSendStream(c.CreateSendStream())
-	c.headerAckStream = newSendStream(c.CreateSendStream())
+	c.encoder = hc.NewQpackEncoder(c.CreateSendStream(), 0, 0)
+	c.decoder = hc.NewQpackDecoder(c.CreateSendStream(), c.config.DecoderTableCapacity)
 
 	// Asynchronously wait for incoming streams and then spawn handlers for each.
 	go func() {
 		go c.serviceControlStream(newRecvStream(<-c.RemoteRecvStreams))
-		go c.serviceHeadersStream(newRecvStream(<-c.RemoteRecvStreams))
-		go c.serviceHeaderAckStream(newRecvStream(<-c.RemoteRecvStreams))
+		go c.decoder.ServiceUpdates(<-c.RemoteRecvStreams)
+		go c.encoder.ServiceAcknowledgments(<-c.RemoteRecvStreams)
 	}()
 }
 
 // FatalError is a helper that passes on HTTP errors to the underlying connection.
 func (c *connection) FatalError(e HTTPError) {
 	c.Close()
-}
-
-// Both client and server need to track outstanding header blocks. They both use
-// the same structure. The server only uses this for internal tracking, but the
-// client also uses this to pick the request ID it includes in requests.
-func (c *connection) nextRequestID() *requestID {
-	return &requestID{atomic.AddUint64(&c.requestID, 1), 0}
 }
 
 func (c *connection) handlePriority(f byte, r io.Reader) error {
@@ -188,38 +144,5 @@ func (c *connection) serviceControlStream(controlStream *recvStream) {
 			c.FatalError(ErrWtf)
 			return
 		}
-	}
-}
-
-func (c *connection) serviceHeadersStream(headersStream *recvStream) {
-	for {
-		t, f, r, err := headersStream.ReadFrame()
-		if err != nil || t != frameHeaders || f != 0 {
-			c.FatalError(ErrWtf)
-			return
-		}
-
-		err = c.decoder.ReadTableUpdates(r)
-		if err != nil {
-			c.FatalError(ErrWtf)
-			return
-		}
-	}
-}
-
-func (c *connection) serviceHeaderAckStream(headerAckStream *recvStream) {
-	for {
-		n, err := headerAckStream.ReadVarint()
-		if err != nil {
-			c.FatalError(ErrWtf)
-			return
-		}
-		reqID := c.outstanding.ack(n)
-		if reqID == nil {
-			c.FatalError(ErrWtf)
-			return
-		}
-
-		c.encoder.AcknowledgeHeader(reqID)
 	}
 }

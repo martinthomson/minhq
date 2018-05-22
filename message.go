@@ -27,23 +27,6 @@ func buildRequestHeaderFields(method string, target string, headers []hc.HeaderF
 	}, headers...), nil
 }
 
-func writeHeaderBlock(encoder *hc.QpackEncoder, headersStream FrameWriter, requestStream FrameWriter,
-	token interface{}, headers []hc.HeaderField) error {
-	var controlBuf, headerBuf bytes.Buffer
-	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, headers...)
-	if err != nil {
-		return err
-	}
-	if controlBuf.Len() > 0 {
-		_, err = headersStream.WriteFrame(frameHeaders, 0, controlBuf.Bytes())
-		if err != nil {
-			return err
-		}
-	}
-	_, err = requestStream.WriteFrame(frameHeaders, 0, headerBuf.Bytes())
-	return err
-}
-
 type headerFieldArray []hc.HeaderField
 
 func (a headerFieldArray) String() string {
@@ -105,13 +88,13 @@ func newIncomingMessage(decoder *hc.QpackDecoder, headers []hc.HeaderField) Inco
 	}
 }
 
-func (msg *IncomingMessage) read(fr FrameReader, frameHandler incomingMessageFrameHandler) error {
+func (msg *IncomingMessage) read(s *recvStream, frameHandler incomingMessageFrameHandler) error {
 	defer close(msg.trailers)
 	defer msg.concatenatingReader.Close()
 
 	done := false
 	for {
-		t, f, r, err := fr.ReadFrame()
+		t, f, r, err := s.ReadFrame()
 		if err == io.EOF {
 			return nil
 		}
@@ -127,7 +110,7 @@ func (msg *IncomingMessage) read(fr FrameReader, frameHandler incomingMessageFra
 			msg.concatenatingReader.Add(r)
 		case frameHeaders:
 			done = true
-			headers, err := msg.decoder.ReadHeaderBlock(r)
+			headers, err := msg.decoder.ReadHeaderBlock(r, s.Id())
 			if err != nil {
 				return err
 			}
@@ -199,25 +182,19 @@ func (cat *concatenatingReader) Read(p []byte) (int, error) {
 // OutgoingMessage contains the common parts of outgoing messages (requests for
 // clients, responses for servers).
 type OutgoingMessage struct {
-	requestID *requestID
-	Headers   headerFieldArray
+	Headers headerFieldArray
 
-	writeStream FrameWriteCloser
+	s *sendStream
 
-	// This stuff is all needed for trailers (ugh).
-	encoder       *hc.QpackEncoder
-	headersStream FrameWriter
-	outstanding   *outstandingHeaders
+	// encoder is needed for encoding trailers (ugh)
+	encoder *hc.QpackEncoder
 }
 
-func newOutgoingMessage(c *connection, s FrameWriteCloser, requestID *requestID, headers []hc.HeaderField) OutgoingMessage {
+func newOutgoingMessage(c *connection, s *sendStream, headers []hc.HeaderField) OutgoingMessage {
 	return OutgoingMessage{
-		requestID:     requestID,
-		Headers:       headers,
-		writeStream:   s,
-		encoder:       c.encoder,
-		headersStream: c.headersStream,
-		outstanding:   &c.outstanding,
+		Headers: headers,
+		s:       s,
+		encoder: c.encoder,
 	}
 }
 
@@ -228,18 +205,28 @@ func (msg *OutgoingMessage) Write(p []byte) (int, error) {
 	// Note that WriteFrame always uses the entire input array, and it reports
 	// how much it wrote, not how much it used.  It always uses the entire
 	// input array.  That's not the io.Writer contract, so adapt.
-	_, err := msg.writeStream.WriteFrame(frameData, 0, p)
+	_, err := msg.s.WriteFrame(frameData, 0, p)
 	if err != nil {
 		return 0, err
 	}
 	return len(p), nil
 }
 
+func (msg *OutgoingMessage) writeHeaderBlock(headers []hc.HeaderField) error {
+	// TODO: ensure that header blocks are properly dropped if the stream is reset.
+	var headerBuf bytes.Buffer
+	err := msg.encoder.WriteHeaderBlock(&headerBuf, msg.s.Id(), headers...)
+	if err != nil {
+		return err
+	}
+	_, err = msg.s.WriteFrame(frameHeaders, 0, headerBuf.Bytes())
+	return err
+}
+
 // End closes out the stream, writing any trailers that might be included.
 func (msg *OutgoingMessage) End(trailers []hc.HeaderField) error {
 	if trailers != nil {
-		err := writeHeaderBlock(msg.encoder, msg.headersStream, msg.writeStream,
-			msg.outstanding.add(msg.requestID), trailers)
+		err := msg.writeHeaderBlock(trailers)
 		if err != nil {
 			return err
 		}
@@ -249,7 +236,7 @@ func (msg *OutgoingMessage) End(trailers []hc.HeaderField) error {
 
 // Close allows OutgoingMessage to implement io.WriteCloser.
 func (msg *OutgoingMessage) Close() error {
-	return msg.writeStream.Close()
+	return msg.s.Close()
 }
 
 // String just formats headers.

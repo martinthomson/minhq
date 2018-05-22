@@ -1,7 +1,6 @@
 package hc
 
 import (
-	"container/list"
 	"sync"
 )
 
@@ -134,34 +133,56 @@ func (qt *QpackDecoderTable) Index(e Entry) int {
 	return qt.table.Index(e)
 }
 
-type qpackUsageTracker struct {
-	uses list.List
+type qpackEncoderEntry struct {
+	qpackEntry
+	usageCount uint
 }
 
-func (qut *qpackUsageTracker) addUse(token interface{}) {
-	qut.uses.PushBack(token)
+func (qe *qpackEncoderEntry) inUse() bool {
+	return qe.usageCount > 0
 }
 
-func (qut *qpackUsageTracker) removeUse(token interface{}) {
-	for e := qut.uses.Front(); e != nil; e = e.Next() {
-		if e.Value == token {
-			qut.uses.Remove(e)
-			return
-		}
+type qpackHeaderBlockUsage struct {
+	entries []*qpackEncoderEntry
+	max     int
+}
+
+func (qhbu *qpackHeaderBlockUsage) add(qe *qpackEncoderEntry) {
+	qhbu.entries = append(qhbu.entries, qe)
+	qe.usageCount++
+	if qe.Base() > qhbu.max {
+		qhbu.max = qe.Base()
 	}
 }
 
-func (qut *qpackUsageTracker) inUse() bool {
-	return qut.usageCount() > 0
+func (qhbu *qpackHeaderBlockUsage) ack() {
+	for _, qe := range qhbu.entries {
+		qe.usageCount--
+	}
+	qhbu.entries = nil
 }
 
-func (qut *qpackUsageTracker) usageCount() int {
-	return qut.uses.Len()
+type qpackUsageTracker map[uint64][]*qpackHeaderBlockUsage
+
+func (qut *qpackUsageTracker) make(id uint64) *qpackHeaderBlockUsage {
+	block := &qpackHeaderBlockUsage{}
+	(*qut)[id] = append((*qut)[id], block)
+	return block
 }
 
-type qpackEncoderEntry struct {
-	qpackEntry
-	qpackUsageTracker
+func (qut *qpackUsageTracker) ack(id uint64) int {
+	allUses := (*qut)[id]
+	if allUses == nil || len(allUses) == 0 {
+		panic("shouldn't be acknowledging blocks that don't exist")
+	}
+	allUses[0].ack()
+	remaining := len(allUses) - 1
+	if remaining == 0 {
+		delete(*qut, id)
+	} else {
+		(*qut)[id] = allUses[1:]
+	}
+	return remaining
 }
 
 // QpackEncoderTable is the table used by the QPACK encoder. It is enhanced to
@@ -223,7 +244,7 @@ func (qevict *qpackEncoderEvictWrapper) CanEvict(e DynamicEntry) bool {
 // Insert an entry. This monitors for both evictions and insertions so that a
 // limit on referenceable entries can be maintained.
 func (qt *QpackEncoderTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
-	entry := &qpackEncoderEntry{qpackEntry{BasicDynamicEntry{name, value, 0}}, qpackUsageTracker{}}
+	entry := &qpackEncoderEntry{qpackEntry{BasicDynamicEntry{name, value, 0}}, 0}
 	inserted := qt.insert(entry, &qpackEncoderEvictWrapper{evict, qt})
 	if inserted {
 		qt.added(entry.Size())
@@ -255,19 +276,10 @@ func (qt *QpackEncoderTable) LookupExtra(name string, value string) (DynamicEntr
 	return nil, nameMatch
 }
 
-// Acknowledge removes uses of dynamic entries attributed to `token`.
-func (qt *QpackEncoderTable) Acknowledge(token interface{}) {
-	for _, e := range qt.dynamic {
-		qe := e.(*qpackEncoderEntry)
-		qe.removeUse(token)
-	}
-}
-
 // SetCapacity sets the table capacity. This panics if it is called after an
 // entry has been inserted. For safety, only set this to a non-zero value from a
 // zero value.
 func (qt *QpackEncoderTable) SetCapacity(c TableCapacity) {
-	// TODO don't panic
 	if qt.Base() > 0 {
 		panic("Can't change encoder table size after inserting anything")
 	}

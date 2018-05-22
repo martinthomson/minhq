@@ -3,7 +3,6 @@ package minhq
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"io"
 	"net/url"
 	"strings"
@@ -56,7 +55,7 @@ func (a headerFieldArray) String() string {
 	}
 	s := ""
 	for _, h := range a {
-		s += fmt.Sprintf(fmt.Sprintf("%%%ds: %%s\n", w), h.Name, h.Value)
+		s += h.String() + "\n"
 	}
 	return s
 }

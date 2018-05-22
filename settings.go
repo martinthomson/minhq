@@ -94,7 +94,7 @@ func (sr *settingsReader) readSettings(r FrameReader) error {
 			if n >= 1<<16 {
 				return ErrSettingValue
 			}
-			sr.c.encoder.SetMaxBlockedStreams(uint16(n))
+			sr.c.encoder.SetMaxBlockedStreams(int(n))
 
 		default:
 			_, err = io.Copy(ioutil.Discard, lr)

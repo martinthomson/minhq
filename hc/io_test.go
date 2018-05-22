@@ -92,7 +92,7 @@ func TestReadString(t *testing.T) {
 		encoded, err := hex.DecodeString(tc.encoded)
 		assert.Nil(t, err)
 		reader := hc.NewReader(bytes.NewReader(encoded))
-		s, err := reader.ReadString()
+		s, err := reader.ReadString(7)
 		assert.Nil(t, err)
 		assert.Equal(t, tc.value, s)
 	}
@@ -111,7 +111,7 @@ func TestWriteString(t *testing.T) {
 
 		var encoded bytes.Buffer
 		writer := hc.NewWriter(&encoded)
-		err = writer.WriteStringRaw(tc.value, huffman)
+		err = writer.WriteStringRaw(tc.value, 7, huffman)
 		assert.Nil(t, err)
 		assert.Equal(t, expected, encoded.Bytes())
 	}

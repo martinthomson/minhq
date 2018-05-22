@@ -18,14 +18,16 @@ type tableState struct {
 }
 
 func checkDynamicTable(t *testing.T, table hc.Table, ts *tableState) {
-	assert.Equal(t, ts.size, table.Used())
+	var size hc.TableCapacity
 	for i, e := range ts.entries {
-		// The initial offset for dynamic entries is 62 in HPACK.
-		entry := table.Get(i + 62)
+		entry := table.GetDynamic(i, table.Base())
+		t.Logf("Dynamic entry: %v", entry)
 		assert.NotNil(t, entry)
 		assert.Equal(t, e.name, entry.Name())
 		assert.Equal(t, e.value, entry.Value())
+		size += hc.TableCapacity(32 + len(e.name) + len(e.value))
 	}
+	assert.Equal(t, size, table.Used())
 }
 
 type testCase struct {
@@ -53,8 +55,8 @@ var testCases = []testCase{
 				{"custom-key", "custom-header"},
 			},
 		},
-		qcramControl: "400a637573746f6d2d6b65790d637573746f6d2d686561646572",
-		qcramHeader:  "01be",
+		qcramControl: "4a637573746f6d2d6b65790d637573746f6d2d686561646572",
+		qcramHeader:  "010080",
 	},
 	{
 		resetTable: true,
@@ -67,7 +69,7 @@ var testCases = []testCase{
 			size: 0,
 		},
 		qcramControl: "",
-		qcramHeader:  "00040c2f73616d706c652f70617468",
+		qcramHeader:  "0000100c2f73616d706c652f70617468",
 	},
 	{
 		resetTable: true,
@@ -80,7 +82,7 @@ var testCases = []testCase{
 			size: 0,
 		},
 		qcramControl: "",
-		qcramHeader:  "00100870617373776f726406736563726574",
+		qcramHeader:  "0000770170617373776f726406736563726574",
 	},
 	{
 		resetTable: true,
@@ -93,7 +95,7 @@ var testCases = []testCase{
 			size: 0,
 		},
 		qcramControl: "",
-		qcramHeader:  "0082",
+		qcramHeader:  "0000d8",
 	},
 	{
 		resetTable: true,
@@ -111,8 +113,8 @@ var testCases = []testCase{
 				{":authority", "www.example.com"},
 			},
 		},
-		qcramControl: "410f7777772e6578616d706c652e636f6d",
-		qcramHeader:  "01828684be",
+		qcramControl: "c50f7777772e6578616d706c652e636f6d",
+		qcramHeader:  "0100d8d4c080",
 	},
 	{
 		resetTable: false,
@@ -132,8 +134,14 @@ var testCases = []testCase{
 				{":authority", "www.example.com"},
 			},
 		},
-		qcramControl: "58086e6f2d6361636865",
-		qcramHeader:  "02828684bfbe",
+		qcramControl: "",
+		qcramHeader:  "0100d8d4c080f2",
+		qcramTable: &tableState{
+			size: 57,
+			entries: []tableStateEntry{
+				{":authority", "www.example.com"},
+			},
+		},
 	},
 	{
 		resetTable: false,
@@ -154,8 +162,15 @@ var testCases = []testCase{
 				{":authority", "www.example.com"},
 			},
 		},
-		qcramControl: "400a637573746f6d2d6b65790c637573746f6d2d76616c7565",
-		qcramHeader:  "03828785c0be",
+		qcramControl: "4a637573746f6d2d6b65790c637573746f6d2d76616c7565",
+		qcramHeader:  "0200d8d3d78180",
+		qcramTable: &tableState{
+			size: 111,
+			entries: []tableStateEntry{
+				{"custom-key", "custom-value"},
+				{":authority", "www.example.com"},
+			},
+		},
 	},
 	{
 		resetTable: true,
@@ -173,8 +188,8 @@ var testCases = []testCase{
 				{":authority", "www.example.com"},
 			},
 		},
-		qcramControl: "418cf1e3c2e5f23a6ba0ab90f4ff",
-		qcramHeader:  "01828684be",
+		qcramControl: "c58cf1e3c2e5f23a6ba0ab90f4ff",
+		qcramHeader:  "0100d8d4c080",
 	},
 	{
 		resetTable: false,
@@ -194,8 +209,14 @@ var testCases = []testCase{
 				{":authority", "www.example.com"},
 			},
 		},
-		qcramControl: "5886a8eb10649cbf",
-		qcramHeader:  "02828684bfbe",
+		qcramControl: "",
+		qcramHeader:  "0100d8d4c080f2",
+		qcramTable: &tableState{
+			size: 57,
+			entries: []tableStateEntry{
+				{":authority", "www.example.com"},
+			},
+		},
 	},
 	{
 		resetTable: false,
@@ -216,8 +237,15 @@ var testCases = []testCase{
 				{":authority", "www.example.com"},
 			},
 		},
-		qcramControl: "408825a849e95ba97d7f8925a849e95bb8e8b4bf",
-		qcramHeader:  "03828785c0be",
+		qcramControl: "6825a849e95ba97d7f8925a849e95bb8e8b4bf",
+		qcramHeader:  "0200d8d3d78180",
+		qcramTable: &tableState{
+			size: 111,
+			entries: []tableStateEntry{
+				{"custom-key", "custom-value"},
+				{":authority", "www.example.com"},
+			},
+		},
 	},
 	{
 		resetTable: true,
@@ -240,10 +268,17 @@ var testCases = []testCase{
 				{":status", "302"},
 			},
 		},
-		qcramControl: "4803333032580770726976617465611d4d6f6e2c203231204f63742032303133" +
-			"2032303a31333a323120474d546e1768747470733a2f2f7777772e6578616d70" +
-			"6c652e636f6d",
-		qcramHeader: "04c1c0bfbe",
+		qcramControl: "f10770726976617465c31d4d6f6e2c203231204f6374203230313320" +
+			"32303a31333a323120474d54c91768747470733a2f2f7777772e6578616d706c652e636f6d",
+		qcramHeader: "0300ff07828180",
+		qcramTable: &tableState{
+			size: 180,
+			entries: []tableStateEntry{
+				{"location", "https://www.example.com"},
+				{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{"cache-control", "private"},
+			},
+		},
 	},
 	{
 		resetTable: false,
@@ -264,8 +299,8 @@ var testCases = []testCase{
 				{"cache-control", "private"},
 			},
 		},
-		qcramControl: "4803333037",
-		qcramHeader:  "05bec1c0bf",
+		qcramControl: "d503333037",
+		qcramHeader:  "040080838281",
 	},
 	{
 		resetTable: false,
@@ -293,11 +328,9 @@ var testCases = []testCase{
 			},
 		},
 		qcramControl: "",
-		qcramHeader: "0488c00f121d4d6f6e2c203231204f637420323031332032303a31333a323220474d" +
-			"54be0f0b04677a69700f2838666f6f3d4153444a4b48514b425a584f5157454f5049" +
-			"5541585157454f49553b206d61782d6167653d333630303b2076657273696f6e" +
-			"3d31",
-		// 0488c00004646174651d4d6f6e2c203231204f637420323031332032303a31333a323220474d54be0010636f6e74656e742d656e636f64696e6704677a6970000a7365742d636f6f6b696538666f6f3d4153444a4b48514b425a584f5157454f50495541585157454f49553b206d61782d6167653d333630303b2076657273696f6e3d31
+		qcramHeader: "0300d582131d4d6f6e2c203231204f637420323031332032303a31333a" +
+			"323220474d5480ff0f1d38666f6f3d4153444a4b48514b425a584f5157454f50495" +
+			"541585157454f49553b206d61782d6167653d333630303b2076657273696f6e3d31",
 		qcramTable: &tableState{
 			size: 222,
 			entries: []tableStateEntry{
@@ -328,9 +361,17 @@ var testCases = []testCase{
 				{":status", "302"},
 			},
 		},
-		qcramControl: "488264025885aec3771a4b6196d07abe941054d444a8200595040b8166e082a6" +
-			"2d1bff6e919d29ad171863c78f0b97c8e9ae82ae43d3",
-		qcramHeader: "04c1c0bfbe",
+		qcramControl: "f185aec3771a4bc396d07abe941054d444a8200595040b8166e082a6" +
+			"2d1bffc9919d29ad171863c78f0b97c8e9ae82ae43d3",
+		qcramHeader: "0300ff07828180",
+		qcramTable: &tableState{
+			size: 180,
+			entries: []tableStateEntry{
+				{"location", "https://www.example.com"},
+				{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{"cache-control", "private"},
+			},
+		},
 	},
 	{
 		resetTable: false,
@@ -351,8 +392,8 @@ var testCases = []testCase{
 				{"cache-control", "private"},
 			},
 		},
-		qcramControl: "4883640eff",
-		qcramHeader:  "05bec1c0bf",
+		qcramControl: "d583640eff",
+		qcramHeader:  "040080838281",
 	},
 	{
 		resetTable: false,
@@ -379,9 +420,8 @@ var testCases = []testCase{
 			},
 		},
 		qcramControl: "",
-		qcramHeader: "04" + "88c0" + "0f1296d07abe941054d444a8200595040b8166e084a62d1bff" +
-			"be" + "0f0b839bd9ab" + "0f28ad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1ab27" +
-			"0fb5291f9587316065c003ed4ee5b1063d5007",
+		qcramHeader: "0300" + "d5" + "82" + "1396d07abe941054d444a8200595040b8166e084a62d1bff" +
+			"80" + "ff0f" + "1dad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1" + "ab270fb5291f9587316065c003ed4ee5b1063d5007",
 		qcramTable: &tableState{
 			size: 222,
 			entries: []tableStateEntry{
@@ -409,8 +449,14 @@ var testCases = []testCase{
 				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 			},
 		},
-		qcramControl: "6196d07abe941054d444a8200595040b8166e084a62d1bff5a839bd9ab",
-		qcramHeader:  "0288bfbe",
+		qcramControl: "c396d07abe941054d444a8200595040b8166e084a62d1bff",
+		qcramHeader:  "0100d580ff0f",
+		qcramTable: &tableState{
+			size: 65,
+			entries: []tableStateEntry{
+				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+			},
+		},
 	},
 	{
 		resetTable: false,
@@ -429,6 +475,12 @@ var testCases = []testCase{
 			},
 		},
 		qcramControl: "",
-		qcramHeader:  "0288bfbe",
+		qcramHeader:  "0100d580ff0f",
+		qcramTable: &tableState{
+			size: 65,
+			entries: []tableStateEntry{
+				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+			},
+		},
 	},
 }

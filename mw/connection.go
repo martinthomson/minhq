@@ -7,11 +7,11 @@ import (
 	"github.com/ekr/minq"
 )
 
-// Packet represents a packet.  It has addresses and a payload.
+// Packet represents a UDP packet.  It has addresses and a payload.
 type Packet struct {
-	RemoteAddr *net.UDPAddr
-	LocalAddr  *net.UDPAddr
-	Data       []byte
+	DestAddr *net.UDPAddr
+	SrcAddr  *net.UDPAddr
+	Data     []byte
 }
 
 // Connection is an async wrapper around minq.Connection

@@ -10,6 +10,7 @@ import (
 )
 
 func resetEncoderCapacity(t *testing.T, encoder *hc.HpackEncoder, first bool) {
+	t.Log("Reset encoder table")
 	encoder.SetCapacity(0)
 	encoder.SetCapacity(256)
 	var capacity bytes.Buffer
@@ -38,12 +39,18 @@ func TestHpackEncoder(t *testing.T) {
 			encoder.HuffmanPreference = hc.HuffmanCodingNever
 		}
 
+		t.Log("Encoding:")
+		for _, h := range tc.headers {
+			t.Logf("  %v", h)
+		}
 		var buf bytes.Buffer
 		err := encoder.WriteHeaderBlock(&buf, tc.headers...)
 		assert.Nil(t, err)
 
 		encoded, err := hex.DecodeString(tc.hpack)
 		assert.Nil(t, err)
+		t.Logf("Expected: %x", encoded)
+		t.Logf("Got:      %x", buf.Bytes())
 		assert.Equal(t, encoded, buf.Bytes())
 
 		checkDynamicTable(t, encoder.Table, &tc.hpackTable)
@@ -60,6 +67,7 @@ func TestHpackEncoderPseudoHeaderOrder(t *testing.T) {
 }
 
 func resetDecoderCapacity(t *testing.T, decoder *hc.HpackDecoder) {
+	t.Log("Reset decoder table")
 	reader := bytes.NewReader([]byte{0x20, 0x3f, 0xe1, 0x01})
 	h, err := decoder.ReadHeaderBlock(reader)
 	assert.Nil(t, err)
@@ -76,11 +84,16 @@ func TestHpackDecoder(t *testing.T) {
 			resetDecoderCapacity(t, decoder)
 		}
 
+		t.Logf("Decoding: %v", tc.hpack)
 		input, err := hex.DecodeString(tc.hpack)
 		assert.Nil(t, err)
-		h, err := decoder.ReadHeaderBlock(bytes.NewReader(input))
+		headers, err := decoder.ReadHeaderBlock(bytes.NewReader(input))
 		assert.Nil(t, err)
-		assert.Equal(t, tc.headers, h)
+		t.Log("Decoded:")
+		for _, h := range headers {
+			t.Logf("  %v", h)
+		}
+		assert.Equal(t, tc.headers, headers)
 
 		checkDynamicTable(t, decoder.Table, &tc.hpackTable)
 	}

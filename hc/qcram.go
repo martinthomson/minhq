@@ -1,9 +1,9 @@
 package hc
 
 import (
-	"strings"
 	"errors"
 	"io"
+	"strings"
 	"sync"
 )
 
@@ -30,8 +30,38 @@ func NewQcramDecoder(capacity TableCapacity) *QcramDecoder {
 	return decoder
 }
 
-func (decoder *QcramDecoder) readIncremental(reader *Reader, base int) error {
-	name, value, err := decoder.readNameValue(reader, 6, decoder.Table.Base())
+func (decoder *QcramDecoder) readInsertWithNameReference(reader *Reader, base int) error {
+	static, err := reader.ReadBit()
+	if err != nil {
+		return err
+	}
+	nameIndex, err := reader.ReadIndex(6)
+	if err != nil {
+		return err
+	}
+	var nameEntry Entry
+	if static != 0 {
+		nameEntry = decoder.table.GetStatic(nameIndex)
+	} else {
+		nameEntry = decoder.table.GetDynamic(nameIndex, base)
+	}
+	if nameEntry == nil {
+		return ErrIndexError
+	}
+	value, err := reader.ReadString(7)
+	if err != nil {
+		return err
+	}
+	decoder.table.Insert(nameEntry.Name(), value, nil)
+	return nil
+}
+
+func (decoder *QcramDecoder) readInsertWithNameLiteral(reader *Reader, base int) error {
+	name, err := reader.ReadString(5)
+	if err != nil {
+		return err
+	}
+	value, err := reader.ReadString(7)
 	if err != nil {
 		return err
 	}
@@ -44,7 +74,7 @@ func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
 	if err != nil {
 		return err
 	}
-	entry := decoder.Table.Get(index)
+	entry := decoder.Table.GetDynamic(index, base)
 	if entry == nil {
 		return ErrIndexError
 	}
@@ -52,13 +82,22 @@ func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
 	return nil
 }
 
+func (decoder *QcramDecoder) readDynamicUpdate(reader *Reader) error {
+	capacity, err := reader.ReadInt(5)
+	if err != nil {
+		return err
+	}
+	decoder.Table.SetCapacity(TableCapacity(capacity))
+	return nil
+}
+
 // ReadTableUpdates reads inserts to the table.
 func (decoder *QcramDecoder) ReadTableUpdates(r io.Reader) error {
 	reader := NewReader(r)
 
-	base := decoder.Table.Base()
 	for {
-		b, err := reader.ReadBits(2)
+		base := decoder.Table.Base()
+		b, err := reader.ReadBit()
 		if err == io.EOF {
 			break // Success
 		}
@@ -66,24 +105,33 @@ func (decoder *QcramDecoder) ReadTableUpdates(r io.Reader) error {
 			return err
 		}
 
-		if b > 1 {
-			return ErrHeaderInTableUpdate
-		}
 		if b == 1 {
-			err = decoder.readIncremental(reader, base)
+			err = decoder.readInsertWithNameReference(reader, base)
 			if err != nil {
 				return err
 			}
 			continue
 		}
-		b, err = reader.ReadBits(1)
+		b, err = reader.ReadBit()
 		if err != nil {
 			return err
 		}
-		if b != 1 {
-			return ErrHeaderInTableUpdate
+		if b == 1 {
+			err = decoder.readInsertWithNameLiteral(reader, base)
+			if err != nil {
+				return err
+			}
+			continue
 		}
-		err = decoder.readDuplicate(reader, base)
+		b, err = reader.ReadBit()
+		if err != nil {
+			return err
+		}
+		if b == 0 {
+			err = decoder.readDuplicate(reader, base)
+		} else {
+			err = decoder.readDynamicUpdate(reader)
+		}
 		if err != nil {
 			return err
 		}
@@ -92,40 +140,123 @@ func (decoder *QcramDecoder) ReadTableUpdates(r io.Reader) error {
 }
 
 func (decoder *QcramDecoder) readIndexed(reader *Reader, base int) (*HeaderField, error) {
-	index, err := reader.ReadIndex(7)
+	static, err := reader.ReadBit()
 	if err != nil {
 		return nil, err
 	}
-	entry := decoder.Table.GetWithBase(index, base)
+	index, err := reader.ReadIndex(6)
+	if err != nil {
+		return nil, err
+	}
+	var entry Entry
+	if static == 1 {
+		entry = decoder.Table.GetStatic(index)
+	} else {
+		entry = decoder.Table.GetDynamic(index, base)
+	}
 	if entry == nil {
 		return nil, ErrIndexError
 	}
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
 }
 
-func (decoder *QcramDecoder) readLiteral(reader *Reader, base int) (*HeaderField, error) {
-	neverIndex, err := reader.ReadBits(3)
+func (decoder *QcramDecoder) readPostBaseIndexed(reader *Reader, base int) (*HeaderField, error) {
+	postBase, err := reader.ReadIndex(4)
 	if err != nil {
 		return nil, err
 	}
-	if neverIndex > 1 {
-		return nil, ErrTableUpdateInHeaderBlock
+	entry := decoder.Table.GetDynamic(-1*postBase, base)
+	if entry == nil {
+		return nil, ErrIndexError
+	}
+	return &HeaderField{entry.Name(), entry.Value(), false}, nil
+}
+
+func (decoder *QcramDecoder) readLiteralWithNameReference(reader *Reader, base int) (*HeaderField, error) {
+	neverIndex, err := reader.ReadBit()
+	if err != nil {
+		return nil, err
+	}
+	static, err := reader.ReadBit()
+	if err != nil {
+		return nil, err
+	}
+	nameIndex, err := reader.ReadIndex(4)
+	if err != nil {
+		return nil, err
+	}
+	var nameEntry Entry
+	if static == 1 {
+		nameEntry = decoder.Table.GetStatic(nameIndex)
+	} else {
+		nameEntry = decoder.Table.GetDynamic(nameIndex, base)
+	}
+	if nameEntry == nil {
+		return nil, ErrIndexError
 	}
 
-	name, value, err := decoder.readNameValue(reader, 4, base)
+	value, err := reader.ReadString(7)
+	if err != nil {
+		return nil, err
+	}
+	return &HeaderField{nameEntry.Name(), value, neverIndex == 1}, nil
+}
+
+func (decoder *QcramDecoder) readLiteralWithPostBaseNameReference(reader *Reader, base int) (*HeaderField, error) {
+	neverIndex, err := reader.ReadBit()
+	if err != nil {
+		return nil, err
+	}
+	postBase, err := reader.ReadIndex(3)
+	if err != nil {
+		return nil, err
+	}
+	nameEntry := decoder.Table.GetDynamic(-1*postBase, base)
+	if nameEntry == nil {
+		return nil, ErrIndexError
+	}
+
+	value, err := reader.ReadString(7)
+	if err != nil {
+		return nil, err
+	}
+	return &HeaderField{nameEntry.Name(), value, neverIndex == 1}, nil
+}
+
+func (decoder *QcramDecoder) readLiteralWithNameLiteral(reader *Reader, base int) (*HeaderField, error) {
+	neverIndex, err := reader.ReadBit()
+	if err != nil {
+		return nil, err
+	}
+	name, err := reader.ReadString(3)
+	if err != nil {
+		return nil, err
+	}
+	value, err := reader.ReadString(7)
 	if err != nil {
 		return nil, err
 	}
 	return &HeaderField{name, value, neverIndex == 1}, nil
 }
 
+// readBase reads the header block header and blocks until the decoder is
+// ready to process the remainder of the block.
 func (decoder *QcramDecoder) readBase(reader *Reader) (int, error) {
 	base, err := reader.ReadIndex(8)
 	if err != nil {
 		return 0, err
 	}
-
-	decoder.table.WaitForBase(base)
+	sign, err := reader.ReadBit()
+	if err != nil {
+		return 0, err
+	}
+	delta, err := reader.ReadIndex(7)
+	if err != nil {
+		return 0, err
+	}
+	// Sign == 1 means negative.
+	largestReference := base + (delta * int(1-2*sign))
+	decoder.table.WaitForEntry(largestReference)
 	return base, nil
 }
 
@@ -139,14 +270,13 @@ func (decoder *QcramDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 
 	headers := []HeaderField{}
 	for {
-		b, err := reader.ReadBits(1)
+		b, err := reader.ReadBit()
 		if err == io.EOF {
 			break // Success!
 		}
 		if err != nil {
 			return nil, err
 		}
-
 		if b == 1 {
 			h, err := decoder.readIndexed(reader, base)
 			if err != nil {
@@ -156,7 +286,42 @@ func (decoder *QcramDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 			continue
 		}
 
-		h, err := decoder.readLiteral(reader, base)
+		b, err = reader.ReadBit()
+		if err != nil {
+			return nil, err
+		}
+		if b == 0 {
+			h, err := decoder.readLiteralWithNameReference(reader, base)
+			if err != nil {
+				return nil, err
+			}
+			headers = append(headers, *h)
+			continue
+		}
+
+		b, err = reader.ReadBit()
+		if err != nil {
+			return nil, err
+		}
+		if b == 1 {
+			h, err := decoder.readLiteralWithNameLiteral(reader, base)
+			if err != nil {
+				return nil, err
+			}
+			headers = append(headers, *h)
+			continue
+		}
+
+		b, err = reader.ReadBit()
+		if err != nil {
+			return nil, err
+		}
+		var h *HeaderField
+		if b == 0 {
+			h, err = decoder.readPostBaseIndexed(reader, base)
+		} else {
+			h, err = decoder.readLiteralWithPostBaseNameReference(reader, base)
+		}
 		if err != nil {
 			return nil, err
 		}
@@ -253,18 +418,18 @@ func NewQcramEncoder(capacity TableCapacity, margin TableCapacity) *QcramEncoder
 
 // writeDuplicate duplicates the indicated entry.
 func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, state *qcramWriterState, i int) error {
-	base := encoder.Table.Base()
 	inserted := encoder.Table.Insert(entry.Name(), entry.Value(), state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
 		return nil
 	}
 
-	err := writer.WriteBits(1, 3)
+	err := writer.WriteBits(0, 3)
 	if err != nil {
 		return err
 	}
-	err = writer.WriteInt(uint64(entry.Index(base)), 5)
+	// Note: subtract 1 from the index to account for the insertion above.
+	err = writer.WriteInt(uint64(encoder.Table.Index(entry)-1), 5)
 	if err != nil {
 		return err
 	}
@@ -275,22 +440,47 @@ func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, 
 }
 
 // writeInsert writes the entry at state.xxx[i] to the control stream.
-// Note that nameMatch is only used for this insertion.
+// Note that only nameMatch is used for this insertion.
 func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState, i int,
 	nameMatch Entry) error {
 	h := state.headers[i]
-	base := encoder.Table.Base()
 	inserted := encoder.Table.Insert(h.Name, h.Value, state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
 		return nil
 	}
 
-	err := writer.WriteBits(1, 2)
+	var instruction uint64
+	if nameMatch != nil {
+		_, dynamic := nameMatch.(DynamicEntry)
+		if dynamic {
+			instruction = 2
+		} else {
+			instruction = 3
+		}
+	} else {
+		instruction = 1
+	}
+	err := writer.WriteBits(instruction, 2)
 	if err != nil {
 		return err
 	}
-	err = encoder.writeNameValue(writer, h, nameMatch, 6, base)
+
+	switch instruction {
+	case 1:
+		err = writer.WriteStringRaw(h.Name, 5, encoder.HuffmanPreference)
+	case 2:
+		// Dynamic: subtract 1 from the index to account for the insertion above.
+		err = writer.WriteInt(uint64(encoder.Table.Index(nameMatch)-1), 6)
+	case 3:
+		// Static: unmodified index.
+		err = writer.WriteInt(uint64(encoder.Table.Index(nameMatch)), 6)
+	}
+	if err != nil {
+		return err
+	}
+
+	err = writer.WriteStringRaw(h.Value, 7, encoder.HuffmanPreference)
 	if err != nil {
 		return err
 	}
@@ -353,32 +543,108 @@ func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *q
 }
 
 func (encoder *QcramEncoder) writeIndexed(writer *Writer, state *qcramWriterState, i int) error {
-	err := writer.WriteBit(1)
+	entry := state.matches[i]
+	var err error
+	var index int
+	var prefix byte
+	dynamicEntry, ok := entry.(DynamicEntry)
+	if ok {
+		index = dynamicEntry.Index(state.largestBase)
+		if index < 0 {
+			// This is a post-base index.
+			prefix = 4
+			index *= -1
+			err = writer.WriteBits(4, 4)
+		} else {
+			prefix = 6
+			err = writer.WriteBits(2, 2)
+		}
+	} else {
+		prefix = 6
+		index = encoder.Table.Index(entry)
+		err = writer.WriteBits(3, 2)
+	}
 	if err != nil {
 		return err
 	}
+
+	err = writer.WriteInt(uint64(index), prefix)
+	if err != nil {
+		return err
+	}
+
 	state.addUse(i)
-	return writer.WriteInt(uint64(state.matches[i].Index(state.largestBase)), 7)
+	return nil
+}
+
+func (encoder *QcramEncoder) writeLiteralNameReference(writer *Writer, state *qcramWriterState,
+	sensitive uint64, nameMatch Entry) error {
+	var index int
+	var prefix byte
+	var err error
+	dynamicEntry, ok := nameMatch.(DynamicEntry)
+	if ok {
+		index = dynamicEntry.Index(state.largestBase)
+		if index < 0 {
+			// Post-base index
+			prefix = 3
+			err = writer.WriteBits(10|sensitive, 5)
+		} else {
+			prefix = 4
+			err = writer.WriteBits(sensitive<<1, 4)
+		}
+	} else {
+		index = encoder.Table.Index(nameMatch)
+		prefix = 4
+		err = writer.WriteBits(sensitive<<1|1, 4)
+	}
+	if err != nil {
+		return err
+	}
+
+	return writer.WriteInt(uint64(index), prefix)
 }
 
 func (encoder *QcramEncoder) writeLiteral(writer *Writer, state *qcramWriterState, i int) error {
 	h := state.headers[i]
-	var code uint64
+	var sensitive uint64
 	if h.Sensitive {
-		code = 1
+		sensitive = 1
 	}
-	err := writer.WriteBits(code, 4)
+
+	var err error
+	nameMatch := state.nameMatches[i]
+	if nameMatch != nil {
+		err = encoder.writeLiteralNameReference(writer, state, sensitive, nameMatch)
+	} else {
+		err = writer.WriteBits(6|sensitive, 4)
+		if err != nil {
+			return err
+		}
+		err = writer.WriteStringRaw(h.Name, 3, encoder.HuffmanPreference)
+	}
+	if err != nil {
+		return err
+	}
+
+	err = writer.WriteStringRaw(h.Value, 7, encoder.HuffmanPreference)
 	if err != nil {
 		return err
 	}
 
 	state.addUse(i)
-	return encoder.writeNameValue(writer, h, state.nameMatches[i], 4, state.largestBase)
+	return nil
 }
 
 func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcramWriterState) error {
 	w := NewWriter(headerWriter)
 	err := w.WriteInt(uint64(state.largestBase), 8)
+	if err != nil {
+		return err
+	}
+
+	// This is the largest reference delta, which this code doesn't use.
+	err = w.WriteInt(0, 8)
 	if err != nil {
 		return err
 	}

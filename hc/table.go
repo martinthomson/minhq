@@ -4,15 +4,15 @@ package hc
 type Entry interface {
 	Name() string
 	Value() string
-	Index(base int) int
+	Base() int
 }
 
 // DynamicEntry is an entry in the dynamic table.
 type DynamicEntry interface {
 	Entry
 	setBase(int)
-	Base() int
 	Size() TableCapacity
+	Index(base int) int
 }
 
 // BasicDynamicEntry is a skeleton implementation of DynamicEntry.
@@ -22,17 +22,9 @@ type BasicDynamicEntry struct {
 	B int    // base
 }
 
-// Index provides the table index relative to the specified base.
-func (hd BasicDynamicEntry) Index(base int) int {
-	delta := base - hd.B
-	if delta < 0 {
-		// If base < inserts, then this entry was added after the base and the index
-		// will be invalid. Return 0.
-		return 0
-	}
-	// If base > inserts, then this entry was added before the base was set. The
-	// index is be valid.
-	return len(staticTable) + 1 + delta
+// Base provides the base index for when this entry was inserted.
+func (hd BasicDynamicEntry) Base() int {
+	return hd.B
 }
 
 // Name is self-explanatory.
@@ -50,9 +42,14 @@ func (hd *BasicDynamicEntry) setBase(base int) {
 	hd.B = base
 }
 
-// Base is the number of inserts at the point that this entry was inserted in the table.
-func (hd BasicDynamicEntry) Base() int {
-	return hd.B
+// Index returns the index of this entry relative to the specified base.
+func (hd *BasicDynamicEntry) Index(base int) int {
+	return base - hd.B
+}
+
+// String turns this into something presentable.
+func (hd *BasicDynamicEntry) String() string {
+	return hd.N + ": " + hd.V
 }
 
 // TableCapacity is the type of the HPACK table capacity.
@@ -64,13 +61,22 @@ type evictionCheck interface {
 
 // Table is the basic interface to a header compression table.
 type Table interface {
-	LastIndex(base int) int
-	GetWithBase(i int, base int) Entry
-	Get(i int) Entry
+	// Base returns the current table base index.
+	Base() int
+	// Index returns the index of the given entry relative to the current
+	// base.  For tables with split spaces (QPACK), this returns the index
+	// in the space that the entry is relevant to.  For tables with a
+	// single space (HPACK), the index is unique.
+	Index(Entry) int
+	GetStatic(i int) Entry
+	GetDynamic(i int, base int) Entry
 	Insert(name string, value string, evict evictionCheck) DynamicEntry
 	Capacity() TableCapacity
-	Base() int
+	SetCapacity(TableCapacity)
 	Used() TableCapacity
+	// Lookup looks in the table for a matching name and value. This produces two
+	// return values: the first is match on both name and value, which is often nil.
+	// The second is a match on name only, which might also be nil.
 	Lookup(name string, value string) (Entry, Entry)
 }
 
@@ -82,41 +88,28 @@ type tableCommon struct {
 	capacity TableCapacity
 	// The amount of used capacity.
 	used TableCapacity
-	// The total number of base thus far.
+	// The total number of inserts thus far.
 	base int
+	// Retrieve a static table entry.
+	getStatic func(int) Entry
 }
 
-// LastIndex returns the index of the last entry in the table. Indices greater
-// than this have been evicted.
-func (table *tableCommon) LastIndex(base int) int {
-	if table.dynamic == nil {
-		return len(staticTable)
-	}
-	return table.dynamic[len(table.dynamic)-1].Index(base)
+// Base returns the current base for the table, which is the number of inserts.
+func (table *tableCommon) Base() int {
+	return table.base
 }
 
-// GetWithBase retrieves an entry relative to the specified base.
-func (table *tableCommon) GetWithBase(i int, base int) Entry {
-	if i <= 0 {
-		return nil
-	}
-	if i <= len(staticTable) {
-		return staticTable[i-1]
-	}
+// GetDynamic retrieves a dynamic table entry using zero-based indexing from the base.
+func (table *tableCommon) GetDynamic(i int, base int) Entry {
 	delta := table.Base() - base
 	if delta < 0 {
 		return nil
 	}
-	dynIndex := i - len(staticTable) - 1 + delta
+	dynIndex := i + delta
 	if dynIndex >= len(table.dynamic) {
 		return nil
 	}
 	return table.dynamic[dynIndex]
-}
-
-// Get an entry from the table.
-func (table *tableCommon) Get(i int) Entry {
-	return table.GetWithBase(i, table.base)
 }
 
 // Evict entries until the used capacity is less than the reduced capacity.
@@ -133,6 +126,12 @@ func (table *tableCommon) evictTo(reduced TableCapacity, evict evictionCheck) bo
 	table.dynamic = table.dynamic[0:l]
 	table.used = used
 	return true
+}
+
+// SetCapacity increases or reduces capacity to the set target.
+func (table *tableCommon) SetCapacity(capacity TableCapacity) {
+	table.evictTo(capacity, nil)
+	table.capacity = capacity
 }
 
 // Insert an entry into the table.  Return nil if the entry couldn't be added.
@@ -173,12 +172,7 @@ func (table *tableCommon) Used() TableCapacity {
 	return table.used
 }
 
-// Base returns the current base for the table, which is the number of inserts.
-func (table *tableCommon) Base() int {
-	return table.base
-}
-
-func (table *tableCommon) lookupImpl(name string, value string, dynamicLimit int) (Entry, Entry) {
+func (table *tableCommon) lookupImpl(staticTable []staticTableEntry, name string, value string, dynamicLimit int) (Entry, Entry) {
 	var nameMatch Entry
 	for _, entry := range staticTable {
 		if entry.Name() == name {
@@ -201,11 +195,4 @@ func (table *tableCommon) lookupImpl(name string, value string, dynamicLimit int
 		}
 	}
 	return nil, nameMatch
-}
-
-// Lookup looks in the table for a matching name and value. This produces two
-// return values: the first is match on both name and value, which is often nil.
-// The second is a match on name only, which might also be nil.
-func (table *tableCommon) Lookup(name string, value string) (Entry, Entry) {
-	return table.lookupImpl(name, value, len(table.dynamic))
 }

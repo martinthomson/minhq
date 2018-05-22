@@ -11,8 +11,17 @@ type hpackEntry struct {
 	BasicDynamicEntry
 }
 
-func (hd hpackEntry) Size() TableCapacity {
+func (hd *hpackEntry) Size() TableCapacity {
 	return hpackOverhead + TableCapacity(len(hd.Name())+len(hd.Value()))
+}
+
+// Index returns the index into the HPACK table.
+func (hd *hpackEntry) Index(base int) int {
+	if base < hd.Base() {
+		// This entry can't be referenced from the given base.
+		return 0
+	}
+	return len(hpackStaticTable) + 1 + base - hd.Base()
 }
 
 // HpackTable is an HPACK implementation of the table.  No extra trimmings.
@@ -27,10 +36,39 @@ func (table *HpackTable) Insert(name string, value string, evict evictionCheck) 
 	return entry
 }
 
-// SetCapacity increases or reduces capacity to the set target.
-func (table *HpackTable) SetCapacity(capacity TableCapacity) {
-	table.evictTo(capacity, nil)
-	table.capacity = capacity
+// GetStatic returns the entry at the specific index.
+func (table *HpackTable) GetStatic(i int) Entry {
+	// Note the shift to 1-based indexing here.
+	if i <= 0 || i > len(hpackStaticTable) {
+		return nil
+	}
+	return hpackStaticTable[i-1]
+}
+
+// Get retrieves an entry.
+func (table *HpackTable) Get(i int) Entry {
+	if i <= 0 {
+		return nil
+	}
+	e := table.GetStatic(i)
+	if e != nil {
+		return e
+	}
+	return table.GetDynamic(i-len(hpackStaticTable)-1, table.Base())
+}
+
+// Lookup finds an entry, see Table.Lookup.
+func (table *HpackTable) Lookup(name string, value string) (Entry, Entry) {
+	return table.lookupImpl(hpackStaticTable, name, value, len(table.dynamic))
+}
+
+// Index returns the HPACK table index for the given entry.
+func (table *HpackTable) Index(e Entry) int {
+	_, dynamic := e.(DynamicEntry)
+	if dynamic {
+		return len(hpackStaticTable) + 1 + table.Base() - e.Base()
+	}
+	return e.Base()
 }
 
 // HpackDecoder is the top-level class for header decompression.
@@ -52,15 +90,40 @@ func (decoder *HpackDecoder) readIndexed(reader *Reader) (*HeaderField, error) {
 	if err != nil {
 		return nil, err
 	}
-	entry := decoder.Table.Get(index)
+	entry := decoder.table.Get(index)
 	if entry == nil {
 		return nil, ErrIndexError
 	}
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
 }
 
+func (decoder *HpackDecoder) readNameValue(reader *Reader, prefix byte) (string, string, error) {
+	index, err := reader.ReadIndex(prefix)
+	if err != nil {
+		return "", "", err
+	}
+	var name string
+	if index == 0 {
+		name, err = reader.ReadString(7)
+		if err != nil {
+			return "", "", err
+		}
+	} else {
+		entry := decoder.table.Get(index)
+		if entry == nil {
+			return "", "", ErrIndexError
+		}
+		name = entry.Name()
+	}
+	value, err := reader.ReadString(7)
+	if err != nil {
+		return "", "", err
+	}
+	return name, value, nil
+}
+
 func (decoder *HpackDecoder) readIncremental(reader *Reader) (*HeaderField, error) {
-	name, value, err := decoder.readNameValue(reader, 6, decoder.Table.Base())
+	name, value, err := decoder.readNameValue(reader, 6)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +146,7 @@ func (decoder *HpackDecoder) readLiteral(reader *Reader) (*HeaderField, error) {
 		return nil, err
 	}
 
-	name, value, err := decoder.readNameValue(reader, 4, decoder.Table.Base())
+	name, value, err := decoder.readNameValue(reader, 4)
 	if err != nil {
 		return nil, err
 	}
@@ -214,7 +277,29 @@ func (encoder *HpackEncoder) writeIndexed(writer *Writer, entry Entry) error {
 	if err != nil {
 		return err
 	}
-	return writer.WriteInt(uint64(entry.Index(encoder.Table.Base())), 7)
+	return writer.WriteInt(uint64(encoder.Table.Index(entry)), 7)
+}
+
+// Write out a name/value pair to the specified writer, with the specified
+// integer prefix size on the name index.
+func (encoder *HpackEncoder) writeNameValue(writer *Writer, h HeaderField,
+	nameEntry Entry, prefix byte, base int) error {
+	nameIndex := uint64(0)
+	if nameEntry != nil {
+		nameIndex = uint64(encoder.Table.Index(nameEntry))
+	}
+	err := writer.WriteInt(nameIndex, prefix)
+	if err != nil {
+		return err
+	}
+	if nameEntry == nil {
+		err = writer.WriteStringRaw(h.Name, 7, encoder.HuffmanPreference)
+		if err != nil {
+			return err
+		}
+	}
+
+	return writer.WriteStringRaw(h.Value, 7, encoder.HuffmanPreference)
 }
 
 func (encoder *HpackEncoder) writeIncremental(writer *Writer, h HeaderField, nameEntry Entry) error {

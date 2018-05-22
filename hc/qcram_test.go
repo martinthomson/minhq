@@ -17,6 +17,7 @@ func TestQcramEncoder(t *testing.T) {
 
 	for _, tc := range testCases {
 		if tc.resetTable {
+			t.Log("Reset encoder")
 			encoder = hc.NewQcramEncoder(256, 0)
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
@@ -32,10 +33,19 @@ func TestQcramEncoder(t *testing.T) {
 			encoder.HuffmanPreference = hc.HuffmanCodingNever
 		}
 
+		t.Log("Encoding:")
+		for _, h := range tc.headers {
+			t.Logf("  %v", h)
+		}
+
 		var controlBuf bytes.Buffer
 		var headerBuf bytes.Buffer
 		err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, tc.headers...)
 		assert.Nil(t, err)
+		t.Logf("Inserts:  %x", controlBuf.Bytes())
+		t.Logf("Expected: %v", tc.qcramControl)
+		t.Logf("Header Block: %x", headerBuf.Bytes())
+		t.Logf("Expected:     %v", tc.qcramHeader)
 
 		expectedControl, err := hex.DecodeString(tc.qcramControl)
 		assert.Nil(t, err)
@@ -68,13 +78,14 @@ func setupEncoder(t *testing.T, encoder *hc.QcramEncoder) {
 		hc.HeaderField{Name: "name1", Value: "value1"},
 		hc.HeaderField{Name: "name2", Value: "value2"})
 	assert.Nil(t, err)
+	t.Logf("Setup Table: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
 
 	// We should see inserts here.
-	expectedControl, err := hex.DecodeString("4084a874943f85ee3a2d287f4084a874945f85ee3a2d28bf")
+	expectedControl, err := hex.DecodeString("64a874943f85ee3a2d287f64a874945f85ee3a2d28bf")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedControl, controlBuf.Bytes())
 	// And two references.
-	assert.Equal(t, []byte{0x02, 0xbf, 0xbe}, headerBuf.Bytes())
+	assert.Equal(t, []byte{0x02, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
 	checkDynamicTable(t, encoder.Table, &tableState{
 		size: 86,
@@ -94,9 +105,10 @@ func assertQcramTableFull(t *testing.T, encoder *hc.QcramEncoder) {
 	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token,
 		hc.HeaderField{Name: "namef", Value: "valuef"})
 	assert.Nil(t, err)
+	t.Logf("Table Full: [%x] %x", controlBuf.Bytes(), headerBuf.Bytes())
 	assert.Equal(t, 0, controlBuf.Len())
 
-	expectedHeader, err := hex.DecodeString("000084a874965f85ee3a2d2cbf")
+	expectedHeader, err := hex.DecodeString("00006ca874965f85ee3a2d2cbf")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -114,13 +126,14 @@ func TestQcramDuplicate(t *testing.T) {
 		hc.HeaderField{Name: "name0", Value: "value0"},
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
+	t.Logf("Force Duplicate: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
 
-	// This should include a duplication (that's the 3f21 on the end).
-	expectedControl, err := hex.DecodeString("4084a874941f85ee3a2d283f3f21")
+	// This should include a duplication (that's the 02 on the end).
+	expectedControl, err := hex.DecodeString("64a874941f85ee3a2d283f02")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedControl, controlBuf.Bytes())
 
-	assert.Equal(t, []byte{0x04, 0xbf, 0xbe}, headerBuf.Bytes())
+	assert.Equal(t, []byte{0x04, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
 	checkDynamicTable(t, encoder.Table, &tableState{
 		size: 172,
@@ -148,14 +161,15 @@ func TestQcramDuplicateLiteral(t *testing.T) {
 		hc.HeaderField{Name: "name0", Value: "value0"},
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
+	t.Logf("Force Duplicate: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
 
 	// name0:value0 can be added, but there isn't enough room to duplicate
-	// name1:value1.
-	expectedControl, err := hex.DecodeString("4084a874941f85ee3a2d283f")
+	// name1:value1, so it uses a literal.
+	expectedControl, err := hex.DecodeString("64a874941f85ee3a2d283f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedControl, controlBuf.Bytes())
 
-	expectedHeader, err := hex.DecodeString("03be0084a874943f85ee3a2d287f")
+	expectedHeader, err := hex.DecodeString("0300806ca874943f85ee3a2d287f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -182,13 +196,14 @@ func TestQcramNameReference(t *testing.T) {
 	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
+	t.Logf("Name Reference: %x %x", controlBuf.Bytes(), headerBuf.Bytes())
 
-	// 7f00 is an insert with a name reference.
-	expectedControl, err := hex.DecodeString("7f0085ee3a2d2bff")
+	// 81 is an insert with a name reference.
+	expectedControl, err := hex.DecodeString("8185ee3a2d2bff")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedControl, controlBuf.Bytes())
 
-	expectedHeader, err := hex.DecodeString("03be")
+	expectedHeader, err := hex.DecodeString("030080")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -215,10 +230,11 @@ func TestNotIndexedNameReference(t *testing.T) {
 	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, "token",
 		hc.HeaderField{Name: "name1", Value: "value9"})
 	assert.Nil(t, err)
+	t.Logf("Non-Indexed Name Reference: [%x] %x", controlBuf.Bytes(), headerBuf.Bytes())
 
 	assert.Equal(t, 0, controlBuf.Len())
 
-	expectedHeader, err := hex.DecodeString("010f2f85ee3a2d2bff")
+	expectedHeader, err := hex.DecodeString("01000085ee3a2d2bff")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -241,10 +257,16 @@ func TestQcramDecoderOrdered(t *testing.T) {
 
 	for _, tc := range testCases {
 		if tc.resetTable {
+			t.Log("Reset table")
 			decoder = hc.NewQcramDecoder(256)
+		}
+		t.Logf("Decode:")
+		for _, h := range tc.headers {
+			t.Logf("  %v", h)
 		}
 
 		if len(tc.qcramControl) > 0 {
+			t.Logf("Control: %v", tc.qcramControl)
 			control, err := hex.DecodeString(tc.qcramControl)
 			assert.Nil(t, err)
 			err = decoder.ReadTableUpdates(bytes.NewReader(control))
@@ -257,6 +279,7 @@ func TestQcramDecoderOrdered(t *testing.T) {
 		}
 		checkDynamicTable(t, decoder.Table, dynamicTable)
 
+		t.Logf("Header: %v", tc.qcramHeader)
 		encoded, err := hex.DecodeString(tc.qcramHeader)
 		assert.Nil(t, err)
 		headers, err := decoder.ReadHeaderBlock(bytes.NewReader(encoded))
@@ -374,7 +397,7 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 				{Name: "location", Value: "https://www.example.com"},
 			},
 			qcramControl: "",
-			qcramHeader:  "0388c0bfbe",
+			qcramHeader:  "0300d5828180",
 		},
 		{
 			resetTable: false,
@@ -384,9 +407,10 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
 				{Name: "location", Value: "https://www.example.com"},
 			},
-			qcramControl: "5885aec3771a4b" + "6196d07abe941054d444a8200595040b8166e082a62d1bff" +
-				"6e919d29ad171863c78f0b97c8e9ae82ae43d3" + "4883640eff",
-			qcramHeader: "04bec1c0bf",
+			qcramControl: "f10770726976617465" +
+				"c31d4d6f6e2c203231204f637420323031332032303a31333a323120474d54" + "c91768747470733a2f2f7777772e6578616d706c652e636f6d" +
+				"d503333037",
+			qcramHeader: "040080838281",
 		},
 	})
 }
@@ -401,7 +425,7 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				{Name: "location", Value: "https://www.example.com"},
 			},
 			qcramControl: "",
-			qcramHeader:  "0288bfbe",
+			qcramHeader:  "0200d58180",
 		},
 		{
 			resetTable: false,
@@ -410,9 +434,10 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				{Name: "cache-control", Value: "private"},
 				{Name: "location", Value: "https://www.example.com"},
 			},
-			qcramControl: "5885aec3771a4b" + "6e919d29ad171863c78f0b97c8e9ae82ae43d3" +
-				"3f20" + "4883640eff",
-			qcramHeader: "04bebfc0",
+			qcramControl: "f10770726976617465" +
+				"c91768747470733a2f2f7777772e6578616d706c652e636f6d" +
+				"d503333037" + "02",
+			qcramHeader: "0400818082",
 		},
 	})
 }

@@ -67,13 +67,15 @@ func (hr *Reader) ReadIndex(prefix byte) (int, error) {
 	return int(offset), nil
 }
 
-// ReadString reads an HPACK-encoded string.
-func (hr *Reader) ReadString() (string, error) {
+// ReadString reads an HPACK-encoded string.  prefix is the size of the length
+// prefix, which does not include the Huffman bit that precedes it.  (All uses of
+// this in HPACK have a 7-bit prefix.)
+func (hr *Reader) ReadString(prefix byte) (string, error) {
 	huffman, err := hr.ReadBit()
 	if err != nil {
 		return "", nil
 	}
-	len, err := hr.ReadInt(7)
+	len, err := hr.ReadInt(prefix)
 	if err != nil {
 		return "", nil
 	}
@@ -148,7 +150,7 @@ const (
 )
 
 // WriteStringRaw writes out the specified string.
-func (hw *Writer) WriteStringRaw(s string, huffman HuffmanCodingChoice) error {
+func (hw *Writer) WriteStringRaw(s string, prefix byte, huffman HuffmanCodingChoice) error {
 	var reader io.Reader = bytes.NewReader([]byte(s))
 	l := len(s)
 	hbit := byte(0)
@@ -180,7 +182,7 @@ func (hw *Writer) WriteStringRaw(s string, huffman HuffmanCodingChoice) error {
 	if err != nil {
 		return err
 	}
-	err = hw.WriteInt(uint64(l), 7)
+	err = hw.WriteInt(uint64(l), prefix)
 	if err != nil {
 		return err
 	}
@@ -195,6 +197,6 @@ func (hw *Writer) WriteStringRaw(s string, huffman HuffmanCodingChoice) error {
 }
 
 // WriteString writes a string, using automatic Huffman coding.
-func (hw *Writer) WriteString(s string) error {
-	return hw.WriteStringRaw(s, HuffmanCodingAuto)
+func (hw *Writer) WriteString(s string, prefix byte) error {
+	return hw.WriteStringRaw(s, prefix, HuffmanCodingAuto)
 }

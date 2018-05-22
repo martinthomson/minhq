@@ -24,7 +24,7 @@ func TestQpackEncoder(t *testing.T) {
 		} else {
 			// We can use the same token here because always acknowledge before encoding
 			// the next block.
-			encoder.Acknowledge(token)
+			encoder.AcknowledgeHeader(token)
 		}
 
 		if tc.huffman {
@@ -109,7 +109,7 @@ func assertQpackTableFull(t *testing.T, encoder *hc.QpackEncoder) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	encoder.Acknowledge(token)
+	encoder.AcknowledgeHeader(token)
 }
 
 func TestQpackDuplicate(t *testing.T) {
@@ -233,7 +233,7 @@ func TestNotIndexedNameReference(t *testing.T) {
 
 	// Even after acknowledging the header block from setup, the reference to the
 	// initial name1 entry remains outstanding and blocks eviction.
-	encoder.Acknowledge("setup")
+	encoder.AcknowledgeHeader("setup")
 	assertQpackTableFull(t, encoder)
 }
 

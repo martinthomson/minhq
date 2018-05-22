@@ -401,6 +401,13 @@ type QpackEncoder struct {
 	encoderCommon
 	table *QpackEncoderTable
 	mutex sync.RWMutex
+
+	// maxBlockedStreams is the peer's setting for the number of
+	// streams that can be blocked.
+	maxBlockedStreams uint16
+	// acknowledgedEntry is the highest dynamic table entry base
+	// that the peer has acknowledged.
+	acknowledgedEntry int
 }
 
 // NewQpackEncoder creates a new QpackEncoder and sets it up.
@@ -692,10 +699,20 @@ func (encoder *QpackEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWri
 // Acknowledge is called when a header block has been acknowledged by the peer.
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
-func (encoder *QpackEncoder) Acknowledge(token interface{}) {
+func (encoder *QpackEncoder) AcknowledgeHeader(token interface{}) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	encoder.table.Acknowledge(token)
+}
+
+// AcknowledgeInsert acknowledges that the remote decoder has received a
+// insert or duplicate instructions up to the specified base.
+func (encoder *QpackEncoder) AcknowledgeInsert(base int) {
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
+	if base > encoder.acknowledgedEntry {
+		encoder.acknowledgedEntry = base
+	}
 }
 
 // SetCapacity sets the table capacity. This panics if it is called when the
@@ -704,4 +721,11 @@ func (encoder *QpackEncoder) SetCapacity(c TableCapacity) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	encoder.table.SetCapacity(c)
+}
+
+// SetMaxBlockedStreams sets the number of streams that this can encode without blocking.
+func (encoder *QpackEncoder) SetMaxBlockedStreams(m uint16) {
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
+	encoder.maxBlockedStreams = m
 }

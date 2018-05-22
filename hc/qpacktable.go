@@ -134,26 +134,34 @@ func (qt *QpackDecoderTable) Index(e Entry) int {
 	return qt.table.Index(e)
 }
 
-type qpackEncoderEntry struct {
-	qpackEntry
+type qpackUsageTracker struct {
 	uses list.List
 }
 
-func (qe *qpackEncoderEntry) addUse(token interface{}) {
-	qe.uses.PushBack(token)
+func (qut *qpackUsageTracker) addUse(token interface{}) {
+	qut.uses.PushBack(token)
 }
 
-func (qe *qpackEncoderEntry) removeUse(token interface{}) {
-	for e := qe.uses.Front(); e != nil; e = e.Next() {
+func (qut *qpackUsageTracker) removeUse(token interface{}) {
+	for e := qut.uses.Front(); e != nil; e = e.Next() {
 		if e.Value == token {
-			qe.uses.Remove(e)
+			qut.uses.Remove(e)
 			return
 		}
 	}
 }
 
-func (qe *qpackEncoderEntry) inUse() bool {
-	return qe.uses.Len() > 0
+func (qut *qpackUsageTracker) inUse() bool {
+	return qut.usageCount() > 0
+}
+
+func (qut *qpackUsageTracker) usageCount() int {
+	return qut.uses.Len()
+}
+
+type qpackEncoderEntry struct {
+	qpackEntry
+	qpackUsageTracker
 }
 
 // QpackEncoderTable is the table used by the QPACK encoder. It is enhanced to
@@ -215,7 +223,7 @@ func (qevict *qpackEncoderEvictWrapper) CanEvict(e DynamicEntry) bool {
 // Insert an entry. This monitors for both evictions and insertions so that a
 // limit on referenceable entries can be maintained.
 func (qt *QpackEncoderTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
-	entry := &qpackEncoderEntry{qpackEntry{BasicDynamicEntry{name, value, 0}}, list.List{}}
+	entry := &qpackEncoderEntry{qpackEntry{BasicDynamicEntry{name, value, 0}}, qpackUsageTracker{}}
 	inserted := qt.insert(entry, &qpackEncoderEvictWrapper{evict, qt})
 	if inserted {
 		qt.added(entry.Size())
@@ -259,6 +267,7 @@ func (qt *QpackEncoderTable) Acknowledge(token interface{}) {
 // entry has been inserted. For safety, only set this to a non-zero value from a
 // zero value.
 func (qt *QpackEncoderTable) SetCapacity(c TableCapacity) {
+	// TODO don't panic
 	if qt.Base() > 0 {
 		panic("Can't change encoder table size after inserting anything")
 	}

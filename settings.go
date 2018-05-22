@@ -2,17 +2,21 @@ package minhq
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"io/ioutil"
 
 	"github.com/martinthomson/minhq/hc"
 )
 
+var ErrSettingValue = errors.New("setting value out of range")
+
 type settingType uint16
 
 const (
-	settingTableSize         = settingType(1)
-	settingMaxHeaderListSize = settingType(6) // TODO implement
+	settingTableSize              = settingType(1)
+	settingMaxHeaderListSize      = settingType(6) // TODO implement
+	settingMaxQpackBlockedStreams = settingType(7)
 )
 
 type settingsWriter struct {
@@ -69,7 +73,21 @@ func (sr *settingsReader) readSettings(r FrameReader) error {
 			if err != nil {
 				return err
 			}
+			if n >= 1<<30 {
+				return ErrSettingValue
+			}
 			sr.c.encoder.SetCapacity(hc.TableCapacity(n))
+
+		case settingMaxQpackBlockedStreams:
+			n, err := lr.ReadVarint()
+			if err != nil {
+				return err
+			}
+			if n >= 1<<16 {
+				return ErrSettingValue
+			}
+			sr.c.encoder.SetMaxBlockedStreams(uint16(n))
+
 		default:
 			_, err = io.Copy(ioutil.Discard, lr)
 		}

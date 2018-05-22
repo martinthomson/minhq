@@ -220,6 +220,6 @@ func (c *connection) serviceHeaderAckStream(headerAckStream *recvStream) {
 			return
 		}
 
-		c.encoder.Acknowledge(reqID)
+		c.encoder.AcknowledgeHeader(reqID)
 	}
 }

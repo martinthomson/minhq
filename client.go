@@ -73,9 +73,9 @@ func serviceUdpSocket(packets chan<- *mw.Packet, socket *net.UDPConn,
 			return
 		}
 		packets <- &mw.Packet{
-			LocalAddr:  localAddr,
-			RemoteAddr: remoteAddr,
-			Data:       buf[:n],
+			DestAddr: localAddr,
+			SrcAddr:  remoteAddr,
+			Data:     buf[:n],
 		}
 	}
 }

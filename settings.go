@@ -24,10 +24,18 @@ type settingsWriter struct {
 }
 
 // WriteTo writes out just one integer setting for the moment.
-func (sw *settingsWriter) WriteTo(w io.Writer) (int64, error) {
+func (sw *settingsWriter) WriteTo(w io.Writer) (written int64, err error) {
 	fw := NewFrameWriter(w)
-	return sw.writeIntSetting(fw, settingTableSize,
+	n, err := sw.writeIntSetting(fw, settingTableSize,
 		uint64(sw.config.DecoderTableCapacity))
+	written += n
+	if err != nil {
+		return
+	}
+	n, err = sw.writeIntSetting(fw, settingMaxQpackBlockedStreams,
+		uint64(sw.config.ConcurrentDecoders))
+	written += n
+	return
 }
 
 func (sw *settingsWriter) writeIntSetting(fw FrameWriter, s settingType, v uint64) (int64, error) {

@@ -42,6 +42,7 @@ var (
 // capacity of the header table.
 type Config struct {
 	DecoderTableCapacity hc.TableCapacity
+	ConcurrentDecoders   uint16
 }
 
 // FrameHandler is used by subclasses of connection to deal with frames that only they handle.

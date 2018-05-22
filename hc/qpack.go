@@ -814,6 +814,7 @@ func (encoder *QpackEncoder) AcknowledgeInsert(base int) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	if base > encoder.highestAcknowledged {
+		// TODO remove streams that are no longer blocked
 		encoder.highestAcknowledged = base
 	}
 }

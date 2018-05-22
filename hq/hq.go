@@ -22,7 +22,8 @@ type clientArguments struct {
 }
 
 type commonFlags struct {
-	TableSize uint64
+	TableSize          uint64
+	ConcurrentDecoders uint64
 }
 
 type commandLine struct {
@@ -82,6 +83,7 @@ func (a *commandLine) Parse() {
 	}
 
 	a.fs.Uint64Var(&a.TableSize, "t", 1<<12, "QPACK table size")
+	a.fs.Uint64Var(&a.ConcurrentDecoders, "b", 100, "QPACK max blocked streams")
 	a.fs.Parse(os.Args[1:])
 
 	if a.fs.NArg() < 1 {
@@ -98,15 +100,28 @@ func (a *commandLine) Parse() {
 	}
 }
 
+func boundsCheck(v uint64, limit uint64, message string) {
+	if v > limit {
+		panic(fmt.Sprintf("%s can't be more than %d", message, limit))
+	}
+}
+
 func main() {
 	args := new(commandLine)
 	args.Parse()
 
+	boundsCheck(args.commonFlags.TableSize, uint64(^uint(0)), "table size (-t)")
+	boundsCheck(args.commonFlags.ConcurrentDecoders, 1<<16-1, "max blocked (-b)")
+	config := &minhq.Config{
+		DecoderTableCapacity: hc.TableCapacity(args.commonFlags.TableSize),
+		ConcurrentDecoders:   uint16(args.commonFlags.ConcurrentDecoders),
+	}
+
 	switch a := args.args.(type) {
 	case *clientArguments:
-		runClient(&args.commonFlags, a)
+		runClient(config, a)
 	case *serverArguments:
-		runServer(&args.commonFlags, a)
+		runServer(config, a)
 	default:
 		panic("unknown command")
 	}
@@ -117,9 +132,8 @@ func die(msg string, err error) {
 	os.Exit(1)
 }
 
-func runClient(common *commonFlags, args *clientArguments) {
-	var client minhq.Client
-	client.Config.DecoderTableCapacity = hc.TableCapacity(common.TableSize)
+func runClient(config *minhq.Config, args *clientArguments) {
+	client := minhq.Client{Config: *config}
 
 	for _, url := range args.URLs {
 		request, err := client.Fetch("GET", url)
@@ -154,9 +168,8 @@ func runClient(common *commonFlags, args *clientArguments) {
 	client.Close()
 }
 
-func runServer(common *commonFlags, args *serverArguments) {
-	config := minhq.Config{DecoderTableCapacity: hc.TableCapacity(common.TableSize)}
-	server, err := minhq.Listen(args.Address, args.CertFile, args.KeyFile, &config)
+func runServer(config *minhq.Config, args *serverArguments) {
+	server, err := minhq.Listen(args.Address, args.CertFile, args.KeyFile, config)
 	if err != nil {
 		die("starting server", err)
 	}

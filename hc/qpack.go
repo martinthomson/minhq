@@ -7,30 +7,30 @@ import (
 	"sync"
 )
 
-// ErrTableUpdateInHeaderBlock shouldn't exist, but this is an early version of QCRAM.
+// ErrTableUpdateInHeaderBlock shouldn't exist, but this is an early version of QPACK.
 var ErrTableUpdateInHeaderBlock = errors.New("header table update in header block")
 
-// ErrHeaderInTableUpdate shouldn't exist, but this is an early version of QCRAM.
+// ErrHeaderInTableUpdate shouldn't exist, but this is an early version of QPACK.
 var ErrHeaderInTableUpdate = errors.New("header emission in table update")
 
-// QcramDecoder is the top-level class for header decompression.
+// QpackDecoder is the top-level class for header decompression.
 // This is intended to be concurrency-safe for reading of header blocks
 // (ReadHeaderBlock), but the reading of table updates (ReadTableChanges) can
 // only run on one thread at a time.
-type QcramDecoder struct {
+type QpackDecoder struct {
 	decoderCommon
-	table *QcramDecoderTable
+	table *QpackDecoderTable
 }
 
-// NewQcramDecoder makes and sets up a QcramDecoder.
-func NewQcramDecoder(capacity TableCapacity) *QcramDecoder {
-	decoder := new(QcramDecoder)
-	decoder.table = NewQcramDecoderTable(capacity)
+// NewQpackDecoder makes and sets up a QpackDecoder.
+func NewQpackDecoder(capacity TableCapacity) *QpackDecoder {
+	decoder := new(QpackDecoder)
+	decoder.table = NewQpackDecoderTable(capacity)
 	decoder.Table = decoder.table
 	return decoder
 }
 
-func (decoder *QcramDecoder) readInsertWithNameReference(reader *Reader, base int) error {
+func (decoder *QpackDecoder) readInsertWithNameReference(reader *Reader, base int) error {
 	static, err := reader.ReadBit()
 	if err != nil {
 		return err
@@ -56,7 +56,7 @@ func (decoder *QcramDecoder) readInsertWithNameReference(reader *Reader, base in
 	return nil
 }
 
-func (decoder *QcramDecoder) readInsertWithNameLiteral(reader *Reader, base int) error {
+func (decoder *QpackDecoder) readInsertWithNameLiteral(reader *Reader, base int) error {
 	name, err := reader.ReadString(5)
 	if err != nil {
 		return err
@@ -69,7 +69,7 @@ func (decoder *QcramDecoder) readInsertWithNameLiteral(reader *Reader, base int)
 	return nil
 }
 
-func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
+func (decoder *QpackDecoder) readDuplicate(reader *Reader, base int) error {
 	index, err := reader.ReadIndex(5)
 	if err != nil {
 		return err
@@ -82,7 +82,7 @@ func (decoder *QcramDecoder) readDuplicate(reader *Reader, base int) error {
 	return nil
 }
 
-func (decoder *QcramDecoder) readDynamicUpdate(reader *Reader) error {
+func (decoder *QpackDecoder) readDynamicUpdate(reader *Reader) error {
 	capacity, err := reader.ReadInt(5)
 	if err != nil {
 		return err
@@ -92,7 +92,7 @@ func (decoder *QcramDecoder) readDynamicUpdate(reader *Reader) error {
 }
 
 // ReadTableUpdates reads inserts to the table.
-func (decoder *QcramDecoder) ReadTableUpdates(r io.Reader) error {
+func (decoder *QpackDecoder) ReadTableUpdates(r io.Reader) error {
 	reader := NewReader(r)
 
 	for {
@@ -139,7 +139,7 @@ func (decoder *QcramDecoder) ReadTableUpdates(r io.Reader) error {
 	return nil
 }
 
-func (decoder *QcramDecoder) readIndexed(reader *Reader, base int) (*HeaderField, error) {
+func (decoder *QpackDecoder) readIndexed(reader *Reader, base int) (*HeaderField, error) {
 	static, err := reader.ReadBit()
 	if err != nil {
 		return nil, err
@@ -160,7 +160,7 @@ func (decoder *QcramDecoder) readIndexed(reader *Reader, base int) (*HeaderField
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
 }
 
-func (decoder *QcramDecoder) readPostBaseIndexed(reader *Reader, base int) (*HeaderField, error) {
+func (decoder *QpackDecoder) readPostBaseIndexed(reader *Reader, base int) (*HeaderField, error) {
 	postBase, err := reader.ReadIndex(4)
 	if err != nil {
 		return nil, err
@@ -172,7 +172,7 @@ func (decoder *QcramDecoder) readPostBaseIndexed(reader *Reader, base int) (*Hea
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
 }
 
-func (decoder *QcramDecoder) readLiteralWithNameReference(reader *Reader, base int) (*HeaderField, error) {
+func (decoder *QpackDecoder) readLiteralWithNameReference(reader *Reader, base int) (*HeaderField, error) {
 	neverIndex, err := reader.ReadBit()
 	if err != nil {
 		return nil, err
@@ -202,7 +202,7 @@ func (decoder *QcramDecoder) readLiteralWithNameReference(reader *Reader, base i
 	return &HeaderField{nameEntry.Name(), value, neverIndex == 1}, nil
 }
 
-func (decoder *QcramDecoder) readLiteralWithPostBaseNameReference(reader *Reader, base int) (*HeaderField, error) {
+func (decoder *QpackDecoder) readLiteralWithPostBaseNameReference(reader *Reader, base int) (*HeaderField, error) {
 	neverIndex, err := reader.ReadBit()
 	if err != nil {
 		return nil, err
@@ -223,7 +223,7 @@ func (decoder *QcramDecoder) readLiteralWithPostBaseNameReference(reader *Reader
 	return &HeaderField{nameEntry.Name(), value, neverIndex == 1}, nil
 }
 
-func (decoder *QcramDecoder) readLiteralWithNameLiteral(reader *Reader, base int) (*HeaderField, error) {
+func (decoder *QpackDecoder) readLiteralWithNameLiteral(reader *Reader, base int) (*HeaderField, error) {
 	neverIndex, err := reader.ReadBit()
 	if err != nil {
 		return nil, err
@@ -241,7 +241,7 @@ func (decoder *QcramDecoder) readLiteralWithNameLiteral(reader *Reader, base int
 
 // readBase reads the header block header and blocks until the decoder is
 // ready to process the remainder of the block.
-func (decoder *QcramDecoder) readBase(reader *Reader) (int, error) {
+func (decoder *QpackDecoder) readBase(reader *Reader) (int, error) {
 	base, err := reader.ReadIndex(8)
 	if err != nil {
 		return 0, err
@@ -261,7 +261,7 @@ func (decoder *QcramDecoder) readBase(reader *Reader) (int, error) {
 }
 
 // ReadHeaderBlock decodes header fields as they arrive.
-func (decoder *QcramDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
+func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error) {
 	reader := NewReader(r)
 	base, err := decoder.readBase(reader)
 	if err != nil {
@@ -337,7 +337,7 @@ func (decoder *QcramDecoder) ReadHeaderBlock(r io.Reader) ([]HeaderField, error)
 
 // This is used by the writer to track which table entries are needed to write
 // out a particular header field.
-type qcramWriterState struct {
+type qpackWriterState struct {
 	headers     []HeaderField
 	matches     []Entry
 	nameMatches []Entry
@@ -351,7 +351,7 @@ type qcramWriterState struct {
 	token interface{}
 }
 
-func (state *qcramWriterState) init(headers []HeaderField, token interface{}) {
+func (state *qpackWriterState) init(headers []HeaderField, token interface{}) {
 	state.headers = make([]HeaderField, len(headers))
 	for i, h := range headers {
 		state.headers[i] = HeaderField{strings.ToLower(h.Name), h.Value, h.Sensitive}
@@ -362,7 +362,7 @@ func (state *qcramWriterState) init(headers []HeaderField, token interface{}) {
 	state.token = token
 }
 
-func (state *qcramWriterState) updateBase(e Entry, match bool) {
+func (state *qpackWriterState) updateBase(e Entry, match bool) {
 	if e == nil {
 		return
 	}
@@ -378,11 +378,11 @@ func (state *qcramWriterState) updateBase(e Entry, match bool) {
 	}
 }
 
-func (state *qcramWriterState) CanEvict(e DynamicEntry) bool {
+func (state *qpackWriterState) CanEvict(e DynamicEntry) bool {
 	return e.Base() != state.smallestBase
 }
 
-func (state *qcramWriterState) addUse(i int) {
+func (state *qpackWriterState) addUse(i int) {
 	e := state.matches[i]
 	if e == nil {
 		e = state.nameMatches[i]
@@ -390,34 +390,34 @@ func (state *qcramWriterState) addUse(i int) {
 	if e == nil {
 		return
 	}
-	qe, ok := e.(*qcramEncoderEntry)
+	qe, ok := e.(*qpackEncoderEntry)
 	if ok {
 		qe.addUse(state.token)
 	}
 }
 
-// QcramEncoder performs header compression using QCRAM.
-type QcramEncoder struct {
+// QpackEncoder performs header compression using QPACK.
+type QpackEncoder struct {
 	encoderCommon
-	table *QcramEncoderTable
+	table *QpackEncoderTable
 	mutex sync.RWMutex
 }
 
-// NewQcramEncoder creates a new QcramEncoder and sets it up.
+// NewQpackEncoder creates a new QpackEncoder and sets it up.
 // `capacity` is the capacity of the table. `margin` is the amount of capacity
 // that the encoder will actively use. Dynamic table entries inside of `margin`
 // will be referenced, those outside will not be. Set `margin` to a value that
 // is less than capacity. Setting `margin` too low can cause churn, where the
 // encoder will duplicate entries rather than reference them.
-func NewQcramEncoder(capacity TableCapacity, margin TableCapacity) *QcramEncoder {
-	encoder := new(QcramEncoder)
-	encoder.table = NewQcramEncoderTable(capacity, margin)
+func NewQpackEncoder(capacity TableCapacity, margin TableCapacity) *QpackEncoder {
+	encoder := new(QpackEncoder)
+	encoder.table = NewQpackEncoderTable(capacity, margin)
 	encoder.Table = encoder.table
 	return encoder
 }
 
 // writeDuplicate duplicates the indicated entry.
-func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, state *qcramWriterState, i int) error {
+func (encoder *QpackEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, state *qpackWriterState, i int) error {
 	inserted := encoder.Table.Insert(entry.Name(), entry.Value(), state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
@@ -441,7 +441,7 @@ func (encoder *QcramEncoder) writeDuplicate(writer *Writer, entry DynamicEntry, 
 
 // writeInsert writes the entry at state.xxx[i] to the control stream.
 // Note that only nameMatch is used for this insertion.
-func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState, i int,
+func (encoder *QpackEncoder) writeInsert(writer *Writer, state *qpackWriterState, i int,
 	nameMatch Entry) error {
 	h := state.headers[i]
 	inserted := encoder.Table.Insert(h.Name, h.Value, state)
@@ -492,7 +492,7 @@ func (encoder *QcramEncoder) writeInsert(writer *Writer, state *qcramWriterState
 
 // writeTableChanges writes out the changes to the header table. It returns the
 // largest value of base that can be used for this to work.
-func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *qcramWriterState) error {
+func (encoder *QpackEncoder) writeTableChanges(controlWriter io.Writer, state *qpackWriterState) error {
 	w := NewWriter(controlWriter)
 
 	// Only one goroutine can update the table at once.
@@ -542,7 +542,7 @@ func (encoder *QcramEncoder) writeTableChanges(controlWriter io.Writer, state *q
 	return nil
 }
 
-func (encoder *QcramEncoder) writeIndexed(writer *Writer, state *qcramWriterState, i int) error {
+func (encoder *QpackEncoder) writeIndexed(writer *Writer, state *qpackWriterState, i int) error {
 	entry := state.matches[i]
 	var err error
 	var index int
@@ -577,7 +577,7 @@ func (encoder *QcramEncoder) writeIndexed(writer *Writer, state *qcramWriterStat
 	return nil
 }
 
-func (encoder *QcramEncoder) writeLiteralNameReference(writer *Writer, state *qcramWriterState,
+func (encoder *QpackEncoder) writeLiteralNameReference(writer *Writer, state *qpackWriterState,
 	sensitive uint64, nameMatch Entry) error {
 	var index int
 	var prefix byte
@@ -605,7 +605,7 @@ func (encoder *QcramEncoder) writeLiteralNameReference(writer *Writer, state *qc
 	return writer.WriteInt(uint64(index), prefix)
 }
 
-func (encoder *QcramEncoder) writeLiteral(writer *Writer, state *qcramWriterState, i int) error {
+func (encoder *QpackEncoder) writeLiteral(writer *Writer, state *qpackWriterState, i int) error {
 	h := state.headers[i]
 	var sensitive uint64
 	if h.Sensitive {
@@ -636,7 +636,7 @@ func (encoder *QcramEncoder) writeLiteral(writer *Writer, state *qcramWriterStat
 	return nil
 }
 
-func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcramWriterState) error {
+func (encoder *QpackEncoder) writeHeaderBlock(headerWriter io.Writer, state *qpackWriterState) error {
 	w := NewWriter(headerWriter)
 	err := w.WriteInt(uint64(state.largestBase), 8)
 	if err != nil {
@@ -672,14 +672,14 @@ func (encoder *QcramEncoder) writeHeaderBlock(headerWriter io.Writer, state *qcr
 // needs to pick a token that is unique among the tokens that are currently
 // unacknowledged. Using the same token twice without first acknowledging it can
 // result in errors.
-func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWriter io.Writer,
+func (encoder *QpackEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWriter io.Writer,
 	token interface{}, headers ...HeaderField) error {
 	err := validatePseudoHeaders(headers)
 	if err != nil {
 		return err
 	}
 
-	var state qcramWriterState
+	var state qpackWriterState
 	state.init(headers, token)
 	err = encoder.writeTableChanges(controlWriter, &state)
 	if err != nil {
@@ -692,7 +692,7 @@ func (encoder *QcramEncoder) WriteHeaderBlock(controlWriter io.Writer, headerWri
 // Acknowledge is called when a header block has been acknowledged by the peer.
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
-func (encoder *QcramEncoder) Acknowledge(token interface{}) {
+func (encoder *QpackEncoder) Acknowledge(token interface{}) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	encoder.table.Acknowledge(token)
@@ -700,7 +700,7 @@ func (encoder *QcramEncoder) Acknowledge(token interface{}) {
 
 // SetCapacity sets the table capacity. This panics if it is called when the
 // capacity has already been set to a non-zero value.
-func (encoder *QcramEncoder) SetCapacity(c TableCapacity) {
+func (encoder *QpackEncoder) SetCapacity(c TableCapacity) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	encoder.table.SetCapacity(c)

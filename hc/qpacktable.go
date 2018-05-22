@@ -5,28 +5,28 @@ import (
 	"sync"
 )
 
-const qcramOverhead = TableCapacity(32)
+const qpackOverhead = TableCapacity(32)
 
-// qcramEntry is an entry in the QCRAM table.
-type qcramEntry struct {
+// qpackEntry is an entry in the QPACK table.
+type qpackEntry struct {
 	BasicDynamicEntry
 }
 
-func (e *qcramEntry) Size() TableCapacity {
-	return qcramOverhead + TableCapacity(len(e.Name())+len(e.Value()))
+func (e *qpackEntry) Size() TableCapacity {
+	return qpackOverhead + TableCapacity(len(e.Name())+len(e.Value()))
 }
 
-type qcramTableCommon struct {
+type qpackTableCommon struct {
 	tableCommon
 }
 
 // Lookup finds an entry.
-func (table *qcramTableCommon) Lookup(name string, value string) (Entry, Entry) {
+func (table *qpackTableCommon) Lookup(name string, value string) (Entry, Entry) {
 	return table.lookupImpl(qpackStaticTable, name, value, table.Base())
 }
 
 // Index returns the index for the given entry.
-func (table *qcramTableCommon) Index(e Entry) int {
+func (table *qpackTableCommon) Index(e Entry) int {
 	_, dynamic := e.(DynamicEntry)
 	if dynamic {
 		return table.Base() - e.Base()
@@ -35,43 +35,43 @@ func (table *qcramTableCommon) Index(e Entry) int {
 }
 
 // GetStatic returns the static table entry at the index i.
-func (table *qcramTableCommon) GetStatic(i int) Entry {
+func (table *qpackTableCommon) GetStatic(i int) Entry {
 	if i < 0 || i >= len(qpackStaticTable) {
 		return nil
 	}
 	return qpackStaticTable[i]
 }
 
-// QcramDecoderTable is a table for decoding QCRAM header fields.
-type QcramDecoderTable struct {
-	table qcramTableCommon
+// QpackDecoderTable is a table for decoding QPACK header fields.
+type QpackDecoderTable struct {
+	table qpackTableCommon
 	lock  sync.RWMutex
 	// This is used to notify any waiting readers that new table entries are
 	// available.
 	insertCondition *sync.Cond
 }
 
-// NewQcramDecoderTable makes a new table of the specified capacity.
-func NewQcramDecoderTable(capacity TableCapacity) *QcramDecoderTable {
-	qt := &QcramDecoderTable{table: qcramTableCommon{tableCommon{capacity: capacity}}}
+// NewQpackDecoderTable makes a new table of the specified capacity.
+func NewQpackDecoderTable(capacity TableCapacity) *QpackDecoderTable {
+	qt := &QpackDecoderTable{table: qpackTableCommon{tableCommon{capacity: capacity}}}
 	qt.insertCondition = sync.NewCond(&qt.lock)
 	return qt
 }
 
 // GetDynamic gets the entry at index i relative to the specified base.
-func (qt *QcramDecoderTable) GetDynamic(i int, base int) Entry {
+func (qt *QpackDecoderTable) GetDynamic(i int, base int) Entry {
 	defer qt.lock.RUnlock()
 	qt.lock.RLock()
 	return qt.table.GetDynamic(i, base)
 }
 
 // GetStatic is a direct forwarder because it references static information.
-func (qt *QcramDecoderTable) GetStatic(i int) Entry {
+func (qt *QpackDecoderTable) GetStatic(i int) Entry {
 	return qt.table.GetStatic(i)
 }
 
 // WaitForEntry waits until the table base reaches or exceeds the specified value.
-func (qt *QcramDecoderTable) WaitForEntry(base int) {
+func (qt *QpackDecoderTable) WaitForEntry(base int) {
 	defer qt.lock.Unlock()
 	qt.lock.Lock()
 	for qt.table.Base() < base {
@@ -80,10 +80,10 @@ func (qt *QcramDecoderTable) WaitForEntry(base int) {
 }
 
 // Insert an entry into the table.
-func (qt *QcramDecoderTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
+func (qt *QpackDecoderTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
 	defer qt.lock.Unlock()
 	qt.lock.Lock()
-	entry := &qcramEntry{BasicDynamicEntry{name, value, 0}}
+	entry := &qpackEntry{BasicDynamicEntry{name, value, 0}}
 	inserted := qt.table.insert(entry, evict)
 	if !inserted {
 		return nil
@@ -93,57 +93,57 @@ func (qt *QcramDecoderTable) Insert(name string, value string, evict evictionChe
 }
 
 // Capacity wraps tableCommon.Capacity with a reader lock.
-func (qt *QcramDecoderTable) Capacity() TableCapacity {
+func (qt *QpackDecoderTable) Capacity() TableCapacity {
 	defer qt.lock.RUnlock()
 	qt.lock.RLock()
 	return qt.table.Capacity()
 }
 
 // SetCapacity wraps tableCommon.SetCapacity with a writer lock.
-func (qt *QcramDecoderTable) SetCapacity(capacity TableCapacity) {
+func (qt *QpackDecoderTable) SetCapacity(capacity TableCapacity) {
 	defer qt.lock.Unlock()
 	qt.lock.Lock()
 	qt.table.SetCapacity(capacity)
 }
 
 // Base wraps tableCommon.Base with a reader lock.
-func (qt *QcramDecoderTable) Base() int {
+func (qt *QpackDecoderTable) Base() int {
 	defer qt.lock.RUnlock()
 	qt.lock.RLock()
 	return qt.table.Base()
 }
 
 // Used wraps tableCommon.Used with a reader lock.
-func (qt *QcramDecoderTable) Used() TableCapacity {
+func (qt *QpackDecoderTable) Used() TableCapacity {
 	defer qt.lock.RUnlock()
 	qt.lock.RLock()
 	return qt.table.Used()
 }
 
 // Lookup wraps tableCommon.Lookup with a reader lock.
-func (qt *QcramDecoderTable) Lookup(name string, value string) (Entry, Entry) {
+func (qt *QpackDecoderTable) Lookup(name string, value string) (Entry, Entry) {
 	defer qt.lock.RUnlock()
 	qt.lock.RLock()
 	return qt.table.Lookup(name, value)
 }
 
 // Index wraps tableCommon.Index with a reader lock.
-func (qt *QcramDecoderTable) Index(e Entry) int {
+func (qt *QpackDecoderTable) Index(e Entry) int {
 	defer qt.lock.RUnlock()
 	qt.lock.RLock()
 	return qt.table.Index(e)
 }
 
-type qcramEncoderEntry struct {
-	qcramEntry
+type qpackEncoderEntry struct {
+	qpackEntry
 	uses list.List
 }
 
-func (qe *qcramEncoderEntry) addUse(token interface{}) {
+func (qe *qpackEncoderEntry) addUse(token interface{}) {
 	qe.uses.PushBack(token)
 }
 
-func (qe *qcramEncoderEntry) removeUse(token interface{}) {
+func (qe *qpackEncoderEntry) removeUse(token interface{}) {
 	for e := qe.uses.Front(); e != nil; e = e.Next() {
 		if e.Value == token {
 			qe.uses.Remove(e)
@@ -152,15 +152,15 @@ func (qe *qcramEncoderEntry) removeUse(token interface{}) {
 	}
 }
 
-func (qe *qcramEncoderEntry) inUse() bool {
+func (qe *qpackEncoderEntry) inUse() bool {
 	return qe.uses.Len() > 0
 }
 
-// QcramEncoderTable is the table used by the QCRAM encoder. It is enhanced to
+// QpackEncoderTable is the table used by the QPACK encoder. It is enhanced to
 // monitor inserts and ensure that references are properly tracked.  This is
-// NOT safe for concurrent use in the same way that QcramDecoderTable is.
-type QcramEncoderTable struct {
-	qcramTableCommon
+// NOT safe for concurrent use in the same way that QpackDecoderTable is.
+type QpackEncoderTable struct {
+	qpackTableCommon
 	// The amount of table capacity we will actively use.
 	referenceableLimit TableCapacity
 	// The number of entries we can use right now.
@@ -169,17 +169,17 @@ type QcramEncoderTable struct {
 	referenceableSize TableCapacity
 }
 
-// NewQcramEncoderTable makes a new encoder table. Note that margin is the
+// NewQpackEncoderTable makes a new encoder table. Note that margin is the
 // amount of space we reserve. Entries that spill over into that space are not
 // referenced by the encoder.
-func NewQcramEncoderTable(capacity TableCapacity, margin TableCapacity) *QcramEncoderTable {
-	return &QcramEncoderTable{
-		qcramTableCommon{tableCommon{capacity: capacity}},
+func NewQpackEncoderTable(capacity TableCapacity, margin TableCapacity) *QpackEncoderTable {
+	return &QpackEncoderTable{
+		qpackTableCommon{tableCommon{capacity: capacity}},
 		capacity - margin, 0, 0,
 	}
 }
 
-func (qt *QcramEncoderTable) added(increase TableCapacity) {
+func (qt *QpackEncoderTable) added(increase TableCapacity) {
 	updatedSize := qt.referenceableSize + increase
 	i := qt.referenceable + 1
 	for updatedSize > qt.referenceableLimit {
@@ -190,21 +190,21 @@ func (qt *QcramEncoderTable) added(increase TableCapacity) {
 	qt.referenceableSize = updatedSize
 }
 
-func (qt *QcramEncoderTable) removed(reduction TableCapacity) {
+func (qt *QpackEncoderTable) removed(reduction TableCapacity) {
 	qt.referenceable--
 	qt.referenceableSize -= reduction
 }
 
-type qcramEncoderEvictWrapper struct {
+type qpackEncoderEvictWrapper struct {
 	wrapped evictionCheck
-	table   *QcramEncoderTable
+	table   *QpackEncoderTable
 }
 
-func (qevict *qcramEncoderEvictWrapper) CanEvict(e DynamicEntry) bool {
+func (qevict *qpackEncoderEvictWrapper) CanEvict(e DynamicEntry) bool {
 	if !qevict.wrapped.CanEvict(e) {
 		return false
 	}
-	qe := e.(*qcramEncoderEntry)
+	qe := e.(*qpackEncoderEntry)
 	if qe.inUse() {
 		return false
 	}
@@ -214,9 +214,9 @@ func (qevict *qcramEncoderEvictWrapper) CanEvict(e DynamicEntry) bool {
 
 // Insert an entry. This monitors for both evictions and insertions so that a
 // limit on referenceable entries can be maintained.
-func (qt *QcramEncoderTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
-	entry := &qcramEncoderEntry{qcramEntry{BasicDynamicEntry{name, value, 0}}, list.List{}}
-	inserted := qt.insert(entry, &qcramEncoderEvictWrapper{evict, qt})
+func (qt *QpackEncoderTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
+	entry := &qpackEncoderEntry{qpackEntry{BasicDynamicEntry{name, value, 0}}, list.List{}}
+	inserted := qt.insert(entry, &qpackEncoderEvictWrapper{evict, qt})
 	if inserted {
 		qt.added(entry.Size())
 		return entry
@@ -226,13 +226,13 @@ func (qt *QcramEncoderTable) Insert(name string, value string, evict evictionChe
 
 // LookupReferenceable looks in the table for a matching name and value. It only
 // includes those entries that are below the configured margin.
-func (qt *QcramEncoderTable) LookupReferenceable(name string, value string) (Entry, Entry) {
+func (qt *QpackEncoderTable) LookupReferenceable(name string, value string) (Entry, Entry) {
 	return qt.lookupImpl(qpackStaticTable, name, value, qt.referenceable)
 }
 
 // LookupExtra looks in the table for a dynamic entry after the provided
 // offset. It is design for use after lookupLimited() fails.
-func (qt *QcramEncoderTable) LookupExtra(name string, value string) (DynamicEntry, DynamicEntry) {
+func (qt *QpackEncoderTable) LookupExtra(name string, value string) (DynamicEntry, DynamicEntry) {
 	var nameMatch DynamicEntry
 	for _, entry := range qt.dynamic[qt.referenceable:] {
 		if entry.Name() == name {
@@ -248,9 +248,9 @@ func (qt *QcramEncoderTable) LookupExtra(name string, value string) (DynamicEntr
 }
 
 // Acknowledge removes uses of dynamic entries attributed to `token`.
-func (qt *QcramEncoderTable) Acknowledge(token interface{}) {
+func (qt *QpackEncoderTable) Acknowledge(token interface{}) {
 	for _, e := range qt.dynamic {
-		qe := e.(*qcramEncoderEntry)
+		qe := e.(*qpackEncoderEntry)
 		qe.removeUse(token)
 	}
 }
@@ -258,7 +258,7 @@ func (qt *QcramEncoderTable) Acknowledge(token interface{}) {
 // SetCapacity sets the table capacity. This panics if it is called after an
 // entry has been inserted. For safety, only set this to a non-zero value from a
 // zero value.
-func (qt *QcramEncoderTable) SetCapacity(c TableCapacity) {
+func (qt *QpackEncoderTable) SetCapacity(c TableCapacity) {
 	if qt.Base() > 0 {
 		panic("Can't change encoder table size after inserting anything")
 	}

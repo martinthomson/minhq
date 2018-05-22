@@ -88,8 +88,8 @@ type connection struct {
 	config Config
 	mw.Connection
 
-	decoder         *hc.QcramDecoder
-	encoder         *hc.QcramEncoder
+	decoder         *hc.QpackDecoder
+	encoder         *hc.QpackEncoder
 	controlStream   *sendStream
 	headersStream   *sendStream
 	headerAckStream *sendStream

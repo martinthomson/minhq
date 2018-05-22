@@ -23,8 +23,8 @@ func newServerConnection(mwc *mw.Connection, config *Config, requests chan<- *Se
 		connection: connection{
 			Connection: *mwc,
 
-			decoder: hc.NewQcramDecoder(config.DecoderTableCapacity),
-			encoder: hc.NewQcramEncoder(0, 0),
+			decoder: hc.NewQpackDecoder(config.DecoderTableCapacity),
+			encoder: hc.NewQpackEncoder(0, 0),
 		},
 		maxPushID: 0,
 	}

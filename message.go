@@ -28,7 +28,7 @@ func buildRequestHeaderFields(method string, target string, headers []hc.HeaderF
 	}, headers...), nil
 }
 
-func writeHeaderBlock(encoder *hc.QcramEncoder, headersStream FrameWriter, requestStream FrameWriter,
+func writeHeaderBlock(encoder *hc.QpackEncoder, headersStream FrameWriter, requestStream FrameWriter,
 	token interface{}, headers []hc.HeaderField) error {
 	var controlBuf, headerBuf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&controlBuf, &headerBuf, token, headers...)
@@ -84,14 +84,14 @@ type incomingMessageFrameHandler func(FrameType, byte, io.Reader) error
 // IncomingMessage is the common parts of inbound messages (requests for
 // servers, responses for clients).
 type IncomingMessage struct {
-	decoder *hc.QcramDecoder
+	decoder *hc.QpackDecoder
 	Headers headerFieldArray
 	concatenatingReader
 	Trailers <-chan []hc.HeaderField
 	trailers chan<- []hc.HeaderField
 }
 
-func newIncomingMessage(decoder *hc.QcramDecoder, headers []hc.HeaderField) IncomingMessage {
+func newIncomingMessage(decoder *hc.QpackDecoder, headers []hc.HeaderField) IncomingMessage {
 	trailers := make(chan []hc.HeaderField)
 	return IncomingMessage{
 		decoder: decoder,
@@ -206,7 +206,7 @@ type OutgoingMessage struct {
 	writeStream FrameWriteCloser
 
 	// This stuff is all needed for trailers (ugh).
-	encoder       *hc.QcramEncoder
+	encoder       *hc.QpackEncoder
 	headersStream FrameWriter
 	outstanding   *outstandingHeaders
 }

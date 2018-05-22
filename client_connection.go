@@ -22,8 +22,8 @@ func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 	hq := &ClientConnection{
 		connection: connection{
 			Connection: *mwc,
-			decoder:    hc.NewQcramDecoder(config.DecoderTableCapacity),
-			encoder:    hc.NewQcramEncoder(0, 0),
+			decoder:    hc.NewQpackDecoder(config.DecoderTableCapacity),
+			encoder:    hc.NewQpackEncoder(0, 0),
 		},
 	}
 	hq.Init(hq)

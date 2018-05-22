@@ -44,6 +44,7 @@ func TestQpackEncoder(t *testing.T) {
 		if tc.resetTable {
 			t.Log("Reset encoder")
 			encoder = hc.NewQpackEncoder(&updateBuf, 256, 0)
+			encoder.SetMaxBlockedStreams(100)
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
 		} else {
@@ -92,6 +93,8 @@ const setupToken = uint64(53709)
 // doesn't acknowledge that header block, so these will be pinned in the table
 // until that can happen.
 func setupEncoder(t *testing.T, encoder *hc.QpackEncoder, updateBuf *bytes.Buffer) {
+	encoder.SetMaxBlockedStreams(100)
+
 	var headerBuf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&headerBuf, setupToken,
 		hc.HeaderField{Name: "name1", Value: "value1"},
@@ -195,6 +198,81 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 	})
 
 	assertQpackTableFull(t, encoder, &updateBuf)
+}
+
+func TestQpackBlockedEncode(t *testing.T) {
+	var updateBuf bytes.Buffer
+	encoder := hc.NewQpackEncoder(&updateBuf, 200, 50)
+	setupEncoder(t, encoder, &updateBuf)
+
+	// Limit to just one blocking stream.
+	encoder.SetMaxBlockedStreams(1)
+
+	// Initially, the setup stream will be the blocking stream,
+	// so this should emit a literal only.
+	var headerBuf bytes.Buffer
+	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
+		hc.HeaderField{Name: "name1", Value: "value1"})
+	assert.Nil(t, err)
+	t.Logf("Blocked Encode: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	assert.Equal(t, []byte{}, updateBuf.Bytes())
+	expectedHeader, err := hex.DecodeString("00006ca874943f85ee3a2d287f")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name2", "value2"},
+		{"name1", "value1"},
+	})
+
+	// Acknowledging the setup stream should allow the header block to
+	// reference the entries added during setup.  And it can block itself.
+	encoder.AcknowledgeHeader(setupToken)
+
+	headerBuf.Reset()
+	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken,
+		hc.HeaderField{Name: "name1", Value: "value1"}, // this can index
+		hc.HeaderField{Name: "name3", Value: "value3"}, // this blocks
+	)
+	assert.Nil(t, err)
+	t.Logf("Blocked Encode: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	expectedUpdates, err := hex.DecodeString("0b64a874959f85ee3a2d2b3f")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
+	expectedHeader, err = hex.DecodeString("03008280")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name3", "value3"},
+		{"name2", "value2"},
+		{"name1", "value1"},
+	})
+
+	// Header blocks on the same stream can block more.
+	headerBuf.Reset()
+	updateBuf.Reset()
+	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken,
+		hc.HeaderField{Name: "name4", Value: "value4"})
+	assert.Nil(t, err)
+	t.Logf("Blocked Encode: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	expectedUpdates, err = hex.DecodeString("0b64a87495af85ee3a2d2b5f")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
+	expectedHeader, err = hex.DecodeString("040080")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name4", "value4"},
+		{"name3", "value3"},
+		{"name2", "value2"},
+		{"name1", "value1"},
+	})
+
 }
 
 // Use a name reference and ensure that it can't be evicted.

@@ -172,7 +172,7 @@ func (table *tableCommon) Used() TableCapacity {
 	return table.used
 }
 
-func (table *tableCommon) lookupImpl(staticTable []staticTableEntry, name string, value string, dynamicLimit int) (Entry, Entry) {
+func (table *tableCommon) lookupImpl(staticTable []staticTableEntry, name string, value string, dynamicMin int, dynamicMax int) (Entry, Entry) {
 	var nameMatch Entry
 	for _, entry := range staticTable {
 		if entry.Name() == name {
@@ -184,7 +184,7 @@ func (table *tableCommon) lookupImpl(staticTable []staticTableEntry, name string
 			}
 		}
 	}
-	for _, entry := range table.dynamic[0:dynamicLimit] {
+	for _, entry := range table.dynamic[dynamicMin:dynamicMax] {
 		if entry.Name() == name {
 			if entry.Value() == value {
 				return entry, entry

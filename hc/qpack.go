@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+const intMax = int(^uint(0) >> 1)
+
 // ErrTableUpdateInHeaderBlock shouldn't exist, but this is an early version of QPACK.
 var ErrTableUpdateInHeaderBlock = errors.New("header table update in header block")
 
@@ -411,7 +413,7 @@ type qpackWriterState struct {
 	uses *qpackHeaderBlockUsage
 }
 
-func (state *qpackWriterState) init(headers []HeaderField, uses *qpackHeaderBlockUsage) {
+func (state *qpackWriterState) initHeaders(headers []HeaderField) {
 	state.headers = make([]HeaderField, len(headers))
 	for i, h := range headers {
 		state.headers[i] = HeaderField{strings.ToLower(h.Name), h.Value, h.Sensitive}
@@ -419,7 +421,6 @@ func (state *qpackWriterState) init(headers []HeaderField, uses *qpackHeaderBloc
 	state.matches = make([]Entry, len(headers))
 	state.nameMatches = make([]Entry, len(headers))
 	state.smallestBase = int(^uint(0) >> 1)
-	state.uses = uses
 }
 
 func (state *qpackWriterState) updateBase(e Entry, match bool) {
@@ -462,17 +463,21 @@ type QpackEncoder struct {
 	table *QpackEncoderTable
 	mutex sync.RWMutex
 
-	// maxBlockedStreams is the peer's setting for the number of
-	// streams that can be blocked.
-	maxBlockedStreams uint16
-	// highestAcknowledged is the highest dynamic table entry base
-	// that the peer has acknowledged.
-	highestAcknowledged int
-
 	// updatesWriter is where header table updates are written
 	updatesWriter *Writer
 
+	// usage tracks the use of the header table.
 	usage qpackUsageTracker
+
+	// maxBlockedStreams is the peer's setting for the number of
+	// streams that can be blocked.
+	maxBlockedStreams int
+	// highestAcknowledged is the highest dynamic table entry base
+	// that the peer has acknowledged.
+	highestAcknowledged int
+	// blockedStreams is the number of streams that are currently
+	// potentially blocked.
+	blockedStreams int
 }
 
 // NewQpackEncoder creates a new QpackEncoder and sets it up.
@@ -486,7 +491,7 @@ func NewQpackEncoder(hw io.Writer, capacity TableCapacity, margin TableCapacity)
 	encoder.table = NewQpackEncoderTable(capacity, margin)
 	encoder.Table = encoder.table
 	encoder.updatesWriter = NewWriter(hw)
-	encoder.usage = make(map[uint64][]*qpackHeaderBlockUsage)
+	encoder.usage = make(map[uint64]*qpackStreamUsage)
 	return encoder
 }
 
@@ -589,7 +594,7 @@ func (encoder *QpackEncoder) writeInsert(w *Writer, state *qpackWriterState, i i
 
 // writeTableChanges writes out the changes to the header table. It returns the
 // largest value of base that can be used for this to work.
-func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState) error {
+func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint64) error {
 	// We have to buffer everything here.
 	var buf bytes.Buffer
 	w := NewWriter(&buf)
@@ -598,13 +603,28 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState) error {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 
+	// wasntBlocking tracks wheter this id was blocking previously.
+	wasntBlocking := false
+	maxBase := intMax
+	usage := encoder.usage.get(id)
+	state.uses = usage.next()
+	// If this stream wasn't already blocking, record that.
+	if usage.max() <= encoder.highestAcknowledged {
+		wasntBlocking = true
+		// If we are already at the limit of blocking streams, then we have to avoid
+		// adding another blocked stream.  Cap the base to the highest acknowledged.
+		if encoder.blockedStreams >= encoder.maxBlockedStreams {
+			maxBase = encoder.highestAcknowledged
+		}
+	}
+
 	for i := range state.headers {
 		// Make sure to write into the slice rather than use a copy of each header.
 		h := state.headers[i]
 		if h.Sensitive {
 			continue
 		}
-		match, nameMatch := encoder.table.LookupReferenceable(h.Name, h.Value)
+		match, nameMatch := encoder.table.LookupReferenceable(h.Name, h.Value, maxBase)
 		if match != nil {
 			state.matches[i] = match
 			state.updateBase(match, true)
@@ -616,12 +636,17 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState) error {
 		// encoding the header block to avoid holding down references to entries that
 		// we might want to evict.
 		var insertNameMatch Entry
-		duplicate, insertNameMatch := encoder.table.LookupExtra(h.Name, h.Value)
+		duplicate, insertNameMatch := encoder.table.LookupExtra(h.Name, h.Value, maxBase)
 		if duplicate != nil {
 			err := encoder.writeDuplicate(w, duplicate, state, i)
 			if err != nil {
 				return err
 			}
+			continue
+		}
+
+		if maxBase <= encoder.highestAcknowledged {
+			// Can't insert another entry, so force this to be a literal.
 			continue
 		}
 
@@ -637,6 +662,11 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState) error {
 		} else {
 			state.updateBase(nameMatch, false)
 		}
+	}
+
+	if wasntBlocking && state.largestBase > encoder.highestAcknowledged {
+		// If this wasn't blocking before, it is now.
+		encoder.blockedStreams++
 	}
 
 	if buf.Len() > 0 {
@@ -790,8 +820,8 @@ func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
 	}
 
 	var state qpackWriterState
-	state.init(headers, encoder.usage.make(id))
-	err = encoder.writeTableChanges(&state)
+	state.initHeaders(headers)
+	err = encoder.writeTableChanges(&state, id)
 	if err != nil {
 		return err
 	}
@@ -805,7 +835,10 @@ func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
 func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	encoder.usage.ack(id)
+	reducedBlocks := encoder.usage.ack(id, encoder.blockedStreams)
+	if reducedBlocks {
+		encoder.blockedStreams--
+	}
 }
 
 // AcknowledgeInsert acknowledges that the remote decoder has received a
@@ -814,7 +847,7 @@ func (encoder *QpackEncoder) AcknowledgeInsert(base int) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	if base > encoder.highestAcknowledged {
-		// TODO remove streams that are no longer blocked
+		encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
 		encoder.highestAcknowledged = base
 	}
 }
@@ -828,8 +861,11 @@ func (encoder *QpackEncoder) SetCapacity(c TableCapacity) {
 }
 
 // SetMaxBlockedStreams sets the number of streams that this can encode without blocking.
-func (encoder *QpackEncoder) SetMaxBlockedStreams(m uint16) {
+func (encoder *QpackEncoder) SetMaxBlockedStreams(m int) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
+	if m < encoder.blockedStreams {
+		panic("can't reduce the max blocked streams below the actual blocked streams")
+	}
 	encoder.maxBlockedStreams = m
 }

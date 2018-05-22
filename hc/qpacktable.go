@@ -21,7 +21,7 @@ type qpackTableCommon struct {
 
 // Lookup finds an entry.
 func (table *qpackTableCommon) Lookup(name string, value string) (Entry, Entry) {
-	return table.lookupImpl(qpackStaticTable, name, value, table.Base())
+	return table.lookupImpl(qpackStaticTable, name, value, 0, len(table.dynamic))
 }
 
 // Index returns the index for the given entry.
@@ -147,42 +147,83 @@ type qpackHeaderBlockUsage struct {
 	max     int
 }
 
-func (qhbu *qpackHeaderBlockUsage) add(qe *qpackEncoderEntry) {
-	qhbu.entries = append(qhbu.entries, qe)
+func (hbu *qpackHeaderBlockUsage) add(qe *qpackEncoderEntry) {
+	hbu.entries = append(hbu.entries, qe)
 	qe.usageCount++
-	if qe.Base() > qhbu.max {
-		qhbu.max = qe.Base()
+	if qe.Base() > hbu.max {
+		hbu.max = qe.Base()
 	}
 }
 
-func (qhbu *qpackHeaderBlockUsage) ack() {
-	for _, qe := range qhbu.entries {
+func (hbu *qpackHeaderBlockUsage) ack() {
+	for _, qe := range hbu.entries {
 		qe.usageCount--
 	}
-	qhbu.entries = nil
+	hbu.entries = nil
 }
 
-type qpackUsageTracker map[uint64][]*qpackHeaderBlockUsage
+type qpackStreamUsage []*qpackHeaderBlockUsage
 
-func (qut *qpackUsageTracker) make(id uint64) *qpackHeaderBlockUsage {
+func (su *qpackStreamUsage) next() *qpackHeaderBlockUsage {
 	block := &qpackHeaderBlockUsage{}
-	(*qut)[id] = append((*qut)[id], block)
+	*su = append(*su, block)
 	return block
 }
 
-func (qut *qpackUsageTracker) ack(id uint64) int {
-	allUses := (*qut)[id]
-	if allUses == nil || len(allUses) == 0 {
+func (su *qpackStreamUsage) ack(largestAcknowledged int) bool {
+	z := (*su)[0]
+	z.ack()
+	*su = (*su)[1:]
+	return z.max > largestAcknowledged && su.max() <= largestAcknowledged
+}
+
+func (su *qpackStreamUsage) count() int {
+	return len(*su)
+}
+
+func (su *qpackStreamUsage) max() int {
+	m := 0
+	for _, hbu := range *su {
+		if hbu.max > m {
+			m = hbu.max
+		}
+	}
+	return m
+}
+
+type qpackUsageTracker map[uint64]*qpackStreamUsage
+
+func (ut *qpackUsageTracker) get(id uint64) *qpackStreamUsage {
+	su := (*ut)[id]
+	if su == nil {
+		su = &qpackStreamUsage{}
+		(*ut)[id] = su
+	}
+	return su
+}
+
+// ack removes one header block from the given id.  This returns true iff
+// the acknowledged header block had a maximum reference higher than
+// largestAcknowledged, and it does not after acknowledging the block.
+func (ut *qpackUsageTracker) ack(id uint64, largestAcknowledged int) bool {
+	su := (*ut)[id]
+	if su == nil {
 		panic("shouldn't be acknowledging blocks that don't exist")
 	}
-	allUses[0].ack()
-	remaining := len(allUses) - 1
-	if remaining == 0 {
-		delete(*qut, id)
-	} else {
-		(*qut)[id] = allUses[1:]
+	reduced := su.ack(largestAcknowledged)
+	if su.count() == 0 {
+		delete(*ut, id)
 	}
-	return remaining
+	return reduced
+}
+
+func (ut *qpackUsageTracker) countBlockedStreams(largestAcknowledged int) (count int) {
+	for _, su := range *ut {
+		if su.max() > largestAcknowledged {
+			count++
+		}
+	}
+	return count
 }
 
 // QpackEncoderTable is the table used by the QPACK encoder. It is enhanced to
@@ -255,15 +296,35 @@ func (qt *QpackEncoderTable) Insert(name string, value string, evict evictionChe
 
 // LookupReferenceable looks in the table for a matching name and value. It only
 // includes those entries that are below the configured margin.
-func (qt *QpackEncoderTable) LookupReferenceable(name string, value string) (Entry, Entry) {
-	return qt.lookupImpl(qpackStaticTable, name, value, qt.referenceable)
+func (qt *QpackEncoderTable) LookupReferenceable(name string, value string, maxBase int) (Entry, Entry) {
+	start := 0
+	if maxBase < qt.Base() {
+		start = qt.Base() - maxBase
+	}
+	end := qt.referenceable
+	if end < start {
+		return nil, nil
+	}
+	return qt.lookupImpl(qpackStaticTable, name, value, start, end)
 }
 
 // LookupExtra looks in the table for a dynamic entry after the provided
-// offset. It is design for use after lookupLimited() fails.
-func (qt *QpackEncoderTable) LookupExtra(name string, value string) (DynamicEntry, DynamicEntry) {
+// offset. It is designed for use after LookupReferenceable() fails.
+func (qt *QpackEncoderTable) LookupExtra(name string, value string, maxBase int) (DynamicEntry, DynamicEntry) {
+	// Don't bother looking here if LookupReferenceable
+	start := 0
+	if maxBase < qt.Base() {
+		start = qt.Base() - maxBase
+	}
+	if qt.referenceable > start {
+		start = qt.referenceable
+	}
+	if start >= len(qt.dynamic) {
+		return nil, nil
+	}
+
 	var nameMatch DynamicEntry
-	for _, entry := range qt.dynamic[qt.referenceable:] {
+	for _, entry := range qt.dynamic[start:] {
 		if entry.Name() == name {
 			if entry.Value() == value {
 				return entry, entry

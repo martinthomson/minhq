@@ -59,7 +59,7 @@ func (table *HpackTable) Get(i int) Entry {
 
 // Lookup finds an entry, see Table.Lookup.
 func (table *HpackTable) Lookup(name string, value string) (Entry, Entry) {
-	return table.lookupImpl(hpackStaticTable, name, value, len(table.dynamic))
+	return table.lookupImpl(hpackStaticTable, name, value, 0, len(table.dynamic))
 }
 
 // Index returns the HPACK table index for the given entry.

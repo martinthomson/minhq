@@ -117,15 +117,13 @@ func (c *Connection) cleanup() {
 
 // StateChanged is required by the minq.ConnectionHandler interface.
 func (c *Connection) StateChanged(s minq.State) {
-	go func() {
-		switch s {
-		case minq.StateEstablished:
-			c.wasConnected = true
-			close(c.connected)
-		case minq.StateClosed, minq.StateError:
-			close(c.closed)
-		}
-	}()
+	switch s {
+	case minq.StateEstablished:
+		c.wasConnected = true
+		close(c.connected)
+	case minq.StateClosed, minq.StateError:
+		close(c.closed)
+	}
 }
 
 // NewStream is required by the minq.ConnectionHandler interface.

@@ -28,8 +28,8 @@ type serverHandler struct {
 // NewConnection is part of the minq.ServerHandler interface.
 // Note the use of a goroutine to avoid blocking the main thread.
 func (sh *serverHandler) NewConnection(mc *minq.Connection) {
+	c := newServerConnection(mc, sh.ops)
 	go func() {
-		c := newServerConnection(mc, sh.ops)
 		<-c.Connected
 		sh.connections <- c
 	}()

@@ -89,7 +89,7 @@ func (req *ClientRequest) handlePushPromise(s *stream, c *ClientConnection, f by
 	if err != nil {
 		return err
 	}
-	pp.Response = c.registerPushPromise(pp)
+	pp.responseChannel = c.registerPushPromise(pp)
 	req.pushes <- pp
 	return nil
 }
@@ -147,7 +147,7 @@ type PushPromise struct {
 	target  *url.URL
 	pushID  uint64
 
-	Response <-chan *ClientResponse
+	responseChannel <-chan *ClientResponse
 }
 
 // Method returns the obvious thing.
@@ -160,6 +160,7 @@ func (pp *PushPromise) Target() *url.URL {
 	return pp.target
 }
 
+// Headers returns the headers from the promise.
 func (pp *PushPromise) Headers() []hc.HeaderField {
 	return pp.headers[:]
 }
@@ -171,7 +172,16 @@ func (pp *PushPromise) setHeaders(h []hc.HeaderField) error {
 	return err
 }
 
+// Reponse returns a response.  Note that because multiple push promises
+// can be made for the same response, only one call to this function will
+// receive a response.  Others receive a nil value.  This prevents
+// concurrent reads of the response body.
+func (pp *PushPromise) Response() *ClientResponse {
+	return <-pp.responseChannel
+}
+
 func (pp *PushPromise) Cancel() error {
-	// TODO
+	// TODO - note that it will be tricky to work out if there is an open
+	// stream for the push.
 	return nil
 }

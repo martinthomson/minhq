@@ -18,9 +18,9 @@ var ErrStreamBlocked = errors.New("Unable to open a new stream for the request")
 type ClientConnection struct {
 	connection
 
-	maxPushID    uint64
-	pushLock     sync.Mutex
-	pushChannels map[uint64]chan *ClientResponse
+	maxPushID uint64
+	pushLock  sync.Mutex
+	promises  map[uint64]*promiseTracker
 }
 
 // NewClientConnection wraps an instance of minq.Connection.
@@ -29,7 +29,7 @@ func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 		connection: connection{
 			Connection: *mwc,
 		},
-		pushChannels: make(map[uint64]chan *ClientResponse),
+		promises: make(map[uint64]*promiseTracker),
 	}
 	hq.Init(hq)
 	hq.creditPushes(config.MaxConcurrentPushes)
@@ -81,12 +81,18 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 func (c *ClientConnection) registerPushPromise(pp *PushPromise) <-chan *ClientResponse {
 	defer c.pushLock.Unlock()
 	c.pushLock.Lock()
-	ch := c.pushChannels[pp.pushID]
-	if ch == nil {
-		ch = make(chan *ClientResponse)
-		c.pushChannels[pp.pushID] = ch
+	tracker := c.promises[pp.pushID]
+	if tracker == nil {
+		tracker = &promiseTracker{
+			promises:        []*PushPromise{pp},
+			responseChannel: make(chan *ClientResponse),
+			response:        nil,
+		}
+		c.promises[pp.pushID] = tracker
+	} else {
+		tracker.Add(pp)
 	}
-	return ch
+	return tracker.responseChannel
 }
 
 func (c *ClientConnection) creditPushes(incr uint64) error {
@@ -97,4 +103,23 @@ func (c *ClientConnection) creditPushes(incr uint64) error {
 	w.WriteVarint(c.maxPushID)
 	_, err := c.controlStream.WriteFrame(frameMaxPushID, 0, buf.Bytes())
 	return err
+}
+
+// promiseTracker looks after push promises.
+type promiseTracker struct {
+	promises        []*PushPromise
+	responseChannel chan *ClientResponse
+	response        *ClientResponse
+}
+
+// Add adds a push promise to an existing tracker entry.
+func (pt *promiseTracker) Add(pp *PushPromise) {
+	pt.promises = append(pt.promises, pp)
+}
+
+// Fulfill fills out the response and lets all the promises know about it.
+func (pt *promiseTracker) Fulfill(resp *ClientResponse) {
+	pt.response = resp
+	pt.responseChannel <- resp
+	close(pt.responseChannel)
 }

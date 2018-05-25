@@ -15,8 +15,21 @@ import (
 	"github.com/stvp/assert"
 )
 
-func TestFetch(t *testing.T) {
-	config := &minhq.Config{DecoderTableCapacity: 4096}
+type clientServer struct {
+	cs     *test.ClientServer
+	server *minhq.Server
+	client *minhq.ClientConnection
+}
+
+func (cs *clientServer) Close() error {
+	return cs.Close()
+}
+
+func newClientServerPair(t *testing.T) *clientServer {
+	config := &minhq.Config{
+		DecoderTableCapacity: 4096,
+		ConcurrentDecoders:   10,
+	}
 	var server *minhq.Server
 	cs := test.NewClientServerPair(func(ms *minq.Server) *mw.Server {
 		server = minhq.RunServer(ms, config)
@@ -26,15 +39,21 @@ func TestFetch(t *testing.T) {
 		serverConnection := <-server.Connections
 		return &serverConnection.Connection
 	})
+	client := minhq.NewClientConnection(cs.ClientConnection, config)
+	return &clientServer{cs, server, client}
+}
+
+func TestFetch(t *testing.T) {
+	cs := newClientServerPair(t)
+	//defer cs.Close()
 
 	url := "https://example.com/%2fhello"
-	clientConnection := minhq.NewClientConnection(cs.ClientConnection, config)
-	clientRequest, err := clientConnection.Fetch("GET", url,
+	clientRequest, err := cs.client.Fetch("GET", url,
 		hc.HeaderField{Name: "User-Agent", Value: "Test"})
 	assert.Nil(t, err)
 	assert.Nil(t, clientRequest.Close())
 
-	serverRequest := <-server.Requests
+	serverRequest := <-cs.server.Requests
 	assert.Equal(t, "Test", serverRequest.GetHeader("user-AGENT"))
 	assert.Equal(t, url, serverRequest.Target.String())
 	_, err = io.Copy(ioutil.Discard, serverRequest)

@@ -206,15 +206,9 @@ func (ops connectionOperations) Close() error {
 	return nil
 }
 
+// Drain the channel so that any outstanding operations won't hang.
 func (ops connectionOperations) drain() {
-	// Drain the channel so that any outstanding operations won't hang.
-	for {
-		select {
-		case op := <-ops.ch:
-			if op == nil {
-				return
-			}
-			op.report(ErrConnectionClosed)
-		}
+	for op := range ops.ch {
+		op.report(ErrConnectionClosed)
 	}
 }

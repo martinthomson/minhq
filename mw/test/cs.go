@@ -2,6 +2,7 @@ package test
 
 import (
 	"net"
+	"sync"
 
 	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/mw"
@@ -12,12 +13,15 @@ var serverAddr = &net.UDPAddr{IP: net.ParseIP("::1"), Port: 12590}
 
 // Transport shuffles arrays of bytes from one channel to the other.
 type Transport struct {
-	read  <-chan []byte
-	write chan<- []byte
+	read      <-chan []byte
+	write     chan<- []byte
+	writeSync sync.Mutex
 }
 
 // Send adds to the write side of this transport.
 func (t *Transport) Send(p []byte) error {
+	defer t.writeSync.Unlock()
+	t.writeSync.Lock()
 	t.write <- p
 	return nil
 }
@@ -25,17 +29,15 @@ func (t *Transport) Send(p []byte) error {
 // Service is intended to run as a goroutine.  Service pulls from the queue of
 // packets it maintains and passes those to the provided channel.
 func (t *Transport) Service(addr *net.UDPAddr, c chan<- *mw.Packet) {
-	for {
-		p := <-t.read
-		if p == nil {
-			return
-		}
+	for p := range t.read {
 		c <- &mw.Packet{SrcAddr: addr, Data: p}
 	}
 }
 
 // Close implements io.Closer.
 func (t *Transport) Close() error {
+	defer t.writeSync.Unlock()
+	t.writeSync.Lock()
 	close(t.write)
 	return nil
 }
@@ -67,8 +69,8 @@ func NewClientServerPair(runServerFunc func(*minq.Server) *mw.Server,
 
 	a := make(chan []byte, 100)
 	b := make(chan []byte, 100)
-	cs.clientTransport = &Transport{a, b}
-	cs.serverTransport = &Transport{b, a}
+	cs.clientTransport = &Transport{a, b, sync.Mutex{}}
+	cs.serverTransport = &Transport{b, a, sync.Mutex{}}
 
 	serverConfig := minq.NewTlsConfig("localhost")
 	cs.Server = runServerFunc(minq.NewServer(&simpleTransportFactory{cs.serverTransport}, &serverConfig, nil))

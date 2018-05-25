@@ -16,13 +16,13 @@ type Server struct {
 	// IncomingPackets are incoming packets.
 	IncomingPackets chan<- *Packet
 
-	ops      connectionOperations
+	ops      *connectionOperations
 	shutdown chan chan<- struct{}
 }
 
 type serverHandler struct {
 	connections chan<- *Connection
-	ops         connectionOperations
+	ops         *connectionOperations
 }
 
 // NewConnection is part of the minq.ServerHandler interface.
@@ -43,16 +43,15 @@ func RunServer(ms *minq.Server) *Server {
 		s:               ms,
 		Connections:     connections,
 		IncomingPackets: incoming,
-		ops:             connectionOperations{make(chan interface{}), 0},
+		ops:             newConnectionOperations(),
 		shutdown:        make(chan chan<- struct{}),
 	}
 	ms.SetHandler(&serverHandler{connections, s.ops})
-	go s.ops.ReadPackets(incoming)
-	go s.service()
+	go s.service(incoming)
 	return s
 }
 
-func (s *Server) service() {
+func (s *Server) service(incoming <-chan *Packet) {
 	defer s.cleanup()
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
@@ -60,9 +59,10 @@ func (s *Server) service() {
 	for {
 		select {
 		case op := <-s.ops.ch:
-			s.ops.Handle(op, func(p *Packet) {
-				_, _ = s.s.Input(p.SrcAddr, p.Data)
-			})
+			s.ops.Handle(op)
+
+		case p := <-incoming:
+			_, _ = s.s.Input(p.SrcAddr, p.Data)
 
 		case <-ticker.C:
 			s.s.CheckTimer()

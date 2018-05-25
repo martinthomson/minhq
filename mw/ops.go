@@ -2,7 +2,7 @@ package mw
 
 import (
 	"errors"
-	"sync/atomic"
+	"sync"
 
 	"github.com/ekr/minq"
 )
@@ -11,18 +11,46 @@ import (
 // operation could be completed. This is never used for Connection.Close().
 var ErrConnectionClosed = errors.New("connection closed before operation could complete")
 
+// ErrUnknownOperation is what you get when operations are used improperly.
+var ErrUnknownOperation = errors.New("unknown operation provided")
+
+type connectionOperation interface {
+	report(error)
+}
+
+type reportErrorChannel struct {
+	result chan<- error
+}
+
+func (rec *reportErrorChannel) report(err error) {
+	rec.result <- err
+}
+
 type getStateRequest struct {
 	c      *Connection
 	result chan<- minq.State
+}
+
+func (op *getStateRequest) report(err error) {
+	op.result <- op.c.minq.GetState()
 }
 
 type getSendStateRequest struct {
 	s      *SendStream
 	result chan<- minq.SendStreamState
 }
+
+func (op *getSendStateRequest) report(error) {
+	op.result <- op.s.SendState()
+}
+
 type getRecvStateRequest struct {
 	s      *RecvStream
 	result chan<- minq.RecvStreamState
+}
+
+func (op *getRecvStateRequest) report(error) {
+	op.result <- op.s.RecvState()
 }
 
 type createStreamRequest struct {
@@ -30,9 +58,17 @@ type createStreamRequest struct {
 	result chan<- minq.Stream
 }
 
+func (req *createStreamRequest) report(error) {
+	req.result <- nil
+}
+
 type createSendStreamRequest struct {
 	c      *Connection
 	result chan<- minq.SendStream
+}
+
+func (req *createSendStreamRequest) report(error) {
+	req.result <- nil
 }
 
 type ioResult struct {
@@ -44,6 +80,10 @@ type ioRequest struct {
 	c      *Connection
 	p      []byte
 	result chan<- *ioResult
+}
+
+func (ior *ioRequest) report(err error) {
+	ior.result <- &ioResult{0, err}
 }
 
 type writeRequest struct {
@@ -66,60 +106,59 @@ func (req *readRequest) read() bool {
 }
 
 type resetRequest struct {
-	c      *Connection
-	s      *SendStream
-	code   minq.ErrorCode // TODO application error code
-	result chan<- error
+	c    *Connection
+	s    *SendStream
+	code minq.ErrorCode // TODO application error code
+	reportErrorChannel
 }
 
 type closeStreamRequest struct {
-	c      *Connection
-	s      *SendStream
-	result chan<- error
+	c *Connection
+	s *SendStream
+	reportErrorChannel
 }
 
 type stopRequest struct {
-	c      *Connection
-	s      *RecvStream
-	code   minq.ErrorCode
-	result chan<- error
+	c    *Connection
+	s    *RecvStream
+	code minq.ErrorCode
+	reportErrorChannel
 }
 
 type closeConnectionRequest struct {
 	c *Connection
-	// TODO error code.
+	reportErrorChannel
 }
 
 type connectionOperations struct {
-	ch     chan interface{}
-	closed uint32
+	ch        chan connectionOperation
+	closed    chan struct{}
+	closeOnce sync.Once
 }
 
-func (ops connectionOperations) Add(op interface{}) {
-	if atomic.LoadUint32(&ops.closed) == 0 {
+func newConnectionOperations() *connectionOperations {
+	return &connectionOperations{
+		ch:        make(chan connectionOperation),
+		closed:    make(chan struct{}),
+		closeOnce: sync.Once{},
+	}
+}
+
+func (ops connectionOperations) Add(op connectionOperation) {
+	select {
+	case <-ops.closed:
+		op.report(ErrConnectionClosed)
+	default:
 		ops.ch <- op
 	}
 }
 
-// ReadPackets is intended to handle a channel of incoming packets.  Intended to be run as a goroutine.
-func (ops connectionOperations) ReadPackets(incoming <-chan *Packet) {
-	for {
-		p, ok := <-incoming
-		if !ok {
-			return
-		}
-		ops.ch <- p
-	}
-}
-
 // Select polls the set of operations and runs any necessary operations.
-func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet)) {
+func (ops connectionOperations) Handle(v connectionOperation) {
 	switch op := v.(type) {
-	case *getStateRequest:
-		op.result <- op.c.minq.GetState()
-
 	case *closeConnectionRequest:
-		op.c.minq.Close( /* TODO Application Close for minq */ )
+		/* TODO Application Close for minq */
+		op.report(op.c.minq.Close())
 
 	case *createStreamRequest:
 		s := op.c.minq.CreateStream()
@@ -129,28 +168,20 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 		s := op.c.minq.CreateSendStream()
 		op.result <- &SendStream{op.c, s}
 
-	case *getSendStateRequest:
-		op.result <- op.s.minq.SendState()
-
 	case *writeRequest:
 		n, err := op.s.minq.Write(op.p)
 		op.result <- &ioResult{n, err}
 
 	case *closeStreamRequest:
-		op.s.minq.Close()
-		op.result <- nil
+		op.report(op.s.minq.Close())
 
 	case *resetRequest:
-		op.result <- op.s.minq.Reset(op.code)
-
-	case *getRecvStateRequest:
-		op.result <- op.s.minq.RecvState()
+		op.report(op.s.minq.Reset(op.code))
 
 	case *readRequest:
 		op.c.handleReadRequest(op)
 
 	case *stopRequest:
-
 		// Note that closing the channel shouldn't be necessary, but caution is
 		// always welcome in these matters.
 		readReq := op.c.readState[op.s.minq]
@@ -158,74 +189,32 @@ func (ops connectionOperations) Handle(v interface{}, packetHandler func(*Packet
 			close(readReq.result)
 			delete(op.c.readState, op.s.minq)
 		}
-		op.result <- op.s.minq.StopSending(op.code)
-
-	case *Packet:
-		packetHandler(op)
+		op.report(op.s.minq.StopSending(op.code))
 
 	default:
-		panic("unknown operation")
+		// This covers the various state inquiry functions, which return
+		// a valid result from the reporting function.
+		op.report(ErrUnknownOperation)
 	}
 }
 
 func (ops connectionOperations) Close() error {
-	if atomic.SwapUint32(&ops.closed, 1) == 0 {
+	ops.closeOnce.Do(func() {
+		close(ops.closed)
 		go ops.drain()
-	}
+	})
 	return nil
 }
 
 func (ops connectionOperations) drain() {
 	// Drain the channel so that any outstanding operations won't hang.
 	for {
-		var operation interface{}
 		select {
-		case v, ok := <-ops.ch:
-			if !ok {
+		case op := <-ops.ch:
+			if op == nil {
 				return
 			}
-			operation = v
-		}
-
-		switch op := operation.(type) {
-		case *getStateRequest:
-			op.result <- op.c.minq.GetState()
-
-		case *closeConnectionRequest:
-			// NOP
-
-		case *createStreamRequest:
-			close(op.result)
-
-		case *createSendStreamRequest:
-			close(op.result)
-
-		case *getSendStateRequest:
-			op.result <- op.s.minq.SendState()
-
-		case *writeRequest:
-			op.result <- &ioResult{0, ErrConnectionClosed}
-
-		case *resetRequest:
-			op.result <- ErrConnectionClosed
-
-		case *closeStreamRequest:
-			op.result <- nil
-
-		case *getRecvStateRequest:
-			op.result <- op.s.minq.RecvState()
-
-		case *readRequest:
-			op.result <- &ioResult{0, ErrConnectionClosed}
-
-		case *stopRequest:
-			op.result <- nil
-
-		case *Packet:
-			// NOOP
-
-		default:
-			panic("unknown operation")
+			op.report(ErrConnectionClosed)
 		}
 	}
 }

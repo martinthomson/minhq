@@ -33,10 +33,10 @@ type Connection struct {
 	IncomingPackets chan<- *Packet
 
 	readState map[minq.RecvStream]*readRequest
-	ops       connectionOperations
+	ops       *connectionOperations
 }
 
-func newConnection(mc *minq.Connection, ops connectionOperations) *Connection {
+func newConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
 	connected := make(chan struct{})
 	streams := make(chan minq.Stream)
 	recvStreams := make(chan minq.RecvStream)
@@ -59,14 +59,13 @@ func newConnection(mc *minq.Connection, ops connectionOperations) *Connection {
 
 // NewConnection makes a new client connection.
 func NewConnection(mc *minq.Connection) *Connection {
-	ops := connectionOperations{make(chan interface{}), 0}
+	ops := newConnectionOperations()
 	c := newConnection(mc, ops)
 	// Only clients need to handle packets directly. Server handles routing of
 	// incoming packets for servers.
 	incoming := make(chan *Packet)
 	c.IncomingPackets = incoming
-	go ops.ReadPackets(incoming)
-	go c.service()
+	go c.service(incoming)
 	return c
 }
 
@@ -74,7 +73,7 @@ func NewConnection(mc *minq.Connection) *Connection {
 // connection doesn't accept incoming packets from Connection.IncomingPackets
 // (that is set to nil), because the expectation is that packets will be passed
 // to the server.
-func newServerConnection(mc *minq.Connection, ops connectionOperations) *Connection {
+func newServerConnection(mc *minq.Connection, ops *connectionOperations) *Connection {
 	if mc.Role() != minq.RoleServer {
 		panic("minq.Server spat out a client")
 	}
@@ -83,7 +82,7 @@ func newServerConnection(mc *minq.Connection, ops connectionOperations) *Connect
 
 // Service is intended to be run as a goroutine. This is the only goroutine that
 // can touch the underlying functions on minq objects.
-func (c *Connection) service() {
+func (c *Connection) service(incoming <-chan *Packet) {
 	defer c.cleanup()
 
 	ticker := time.NewTicker(50 * time.Millisecond)
@@ -95,9 +94,9 @@ func (c *Connection) service() {
 		}
 		select {
 		case op := <-c.ops.ch:
-			c.ops.Handle(op, func(p *Packet) {
-				_ = c.minq.Input(p.Data)
-			})
+			c.ops.Handle(op)
+		case p := <-incoming:
+			_ = c.minq.Input(p.Data)
 		case <-ticker.C:
 			c.minq.CheckTimer()
 		}
@@ -172,9 +171,9 @@ func (c *Connection) GetState() minq.State {
 
 // Close the connection.
 func (c *Connection) Close( /* TODO application error code */ ) error {
-	c.ops.Add(&closeConnectionRequest{c})
-	<-c.closed
-	return nil
+	result := make(chan error)
+	c.ops.Add(&closeConnectionRequest{c, reportErrorChannel{result}})
+	return <-result
 }
 
 // CreateStream creates a new bidirectional stream.

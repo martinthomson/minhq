@@ -4,15 +4,11 @@ import (
 	"sync"
 )
 
-const qpackOverhead = TableCapacity(32)
+const tableOverhead = TableCapacity(32)
 
 // qpackEntry is an entry in the QPACK table.
 type qpackEntry struct {
 	BasicDynamicEntry
-}
-
-func (e *qpackEntry) Size() TableCapacity {
-	return qpackOverhead + TableCapacity(len(e.Name())+len(e.Value()))
 }
 
 type qpackTableCommon struct {
@@ -302,29 +298,36 @@ func (qt *QpackEncoderTable) LookupReferenceable(name string, value string, maxB
 		start = qt.Base() - maxBase
 	}
 	end := qt.referenceable
-	if end < start {
-		return nil, nil
+	if end <= start {
+		end = start // i.e., don't search the dynamic table at all.
 	}
 	return qt.lookupImpl(qpackStaticTable, name, value, start, end)
 }
 
+// LookupBlocked looks in the portion of the table that we're blocked from looking at
+// and returns true if there is a matching entry.  This is used to prevent inserting
+// too many duplicates of the same entry when the encoder is blocked.
+func (qt *QpackEncoderTable) LookupBlocked(name string, value string, maxBase int) bool {
+	if maxBase >= qt.Base() {
+		return false
+	}
+	end := qt.Base() - maxBase
+	if end > qt.referenceable {
+		end = qt.referenceable
+	}
+	for _, entry := range qt.dynamic[:end] {
+		if entry.Name() == name && entry.Value() == value {
+			return true
+		}
+	}
+	return false
+}
+
 // LookupExtra looks in the table for a dynamic entry after the provided
 // offset. It is designed for use after LookupReferenceable() fails.
-func (qt *QpackEncoderTable) LookupExtra(name string, value string, maxBase int) (DynamicEntry, DynamicEntry) {
-	// Don't bother looking here if LookupReferenceable
-	start := 0
-	if maxBase < qt.Base() {
-		start = qt.Base() - maxBase
-	}
-	if qt.referenceable > start {
-		start = qt.referenceable
-	}
-	if start >= len(qt.dynamic) {
-		return nil, nil
-	}
-
+func (qt *QpackEncoderTable) LookupExtra(name string, value string) (DynamicEntry, DynamicEntry) {
 	var nameMatch DynamicEntry
-	for _, entry := range qt.dynamic[start:] {
+	for _, entry := range qt.dynamic[qt.referenceable:] {
 		if entry.Name() == name {
 			if entry.Value() == value {
 				return entry, entry

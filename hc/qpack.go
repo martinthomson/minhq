@@ -10,11 +10,9 @@ import (
 
 const intMax = int(^uint(0) >> 1)
 
-// ErrTableUpdateInHeaderBlock shouldn't exist, but this is an early version of QPACK.
-var ErrTableUpdateInHeaderBlock = errors.New("header table update in header block")
-
-// ErrHeaderInTableUpdate shouldn't exist, but this is an early version of QPACK.
-var ErrHeaderInTableUpdate = errors.New("header emission in table update")
+// ErrTableOverflow is raised when an insert is too large for the table.
+// Unlike HPACK, QPACK doesn't allow this.
+var ErrTableOverflow = errors.New("inserting entry that is too large for the table")
 
 // HasIdentity is used for tracking of outstanding header blocks.
 type HasIdentity interface {
@@ -89,6 +87,18 @@ func (decoder *QpackDecoder) ServiceUpdates(hr io.Reader) {
 	}
 }
 
+func (decoder *QpackDecoder) readValueAndInsert(reader *Reader, name string) error {
+	value, err := reader.ReadString(7)
+	if err != nil {
+		return err
+	}
+	if tableOverhead+TableCapacity(len(name)+len(value)) > decoder.Table.Capacity() {
+		return ErrTableOverflow
+	}
+	decoder.Table.Insert(name, value, nil)
+	return nil
+}
+
 func (decoder *QpackDecoder) readInsertWithNameReference(reader *Reader, base int) error {
 	static, err := reader.ReadBit()
 	if err != nil {
@@ -107,12 +117,7 @@ func (decoder *QpackDecoder) readInsertWithNameReference(reader *Reader, base in
 	if nameEntry == nil {
 		return ErrIndexError
 	}
-	value, err := reader.ReadString(7)
-	if err != nil {
-		return err
-	}
-	decoder.table.Insert(nameEntry.Name(), value, nil)
-	return nil
+	return decoder.readValueAndInsert(reader, nameEntry.Name())
 }
 
 func (decoder *QpackDecoder) readInsertWithNameLiteral(reader *Reader, base int) error {
@@ -120,12 +125,7 @@ func (decoder *QpackDecoder) readInsertWithNameLiteral(reader *Reader, base int)
 	if err != nil {
 		return err
 	}
-	value, err := reader.ReadString(7)
-	if err != nil {
-		return err
-	}
-	decoder.table.Insert(name, value, nil)
-	return nil
+	return decoder.readValueAndInsert(reader, name)
 }
 
 func (decoder *QpackDecoder) readDuplicate(reader *Reader, base int) error {
@@ -410,6 +410,11 @@ type qpackWriterState struct {
 	largestBase  int
 	smallestBase int
 
+	// wasBlocked records if the record was originally blocked.
+	wasBlocked bool
+	// maxBase is the maximum base that can be referenced by this state.
+	maxBase int
+	// uses is the usage tracker for the header block we're producing.
 	uses *qpackHeaderBlockUsage
 }
 
@@ -423,10 +428,42 @@ func (state *qpackWriterState) initHeaders(headers []HeaderField) {
 	state.smallestBase = int(^uint(0) >> 1)
 }
 
-func (state *qpackWriterState) updateBase(e Entry, match bool) {
-	if e == nil {
+// setupUsage configures the state with a usage tracker.
+func (state *qpackWriterState) setupUsage(streamUsage *qpackStreamUsage, highestAcknowledged int, blockingAllowed bool) {
+	state.maxBase = intMax
+	if streamUsage.max() > highestAcknowledged {
+		state.wasBlocked = true
+	} else {
+		// If we are already at the limit of blocking streams, then we have to avoid
+		// adding another blocked stream.  Cap the base to the highest acknowledged.
+		if !blockingAllowed {
+			state.maxBase = highestAcknowledged
+		}
+	}
+	state.uses = streamUsage.next()
+}
+
+func dynBase(e Entry) int {
+	dyn, ok := e.(DynamicEntry)
+	if !ok {
+		return 0
+	}
+	return dyn.Base()
+}
+
+func (state *qpackWriterState) recordMatch(i int, full Entry, name Entry) {
+	if full != nil && dynBase(full) <= state.maxBase {
+		state.matches[i] = full
+		state.updateBase(full, true)
 		return
 	}
+	if name != nil && dynBase(name) <= state.maxBase {
+		state.nameMatches[i] = name
+		state.updateBase(name, false)
+	}
+}
+
+func (state *qpackWriterState) updateBase(e Entry, match bool) {
 	dyn, ok := e.(DynamicEntry)
 	if !ok {
 		return
@@ -439,8 +476,16 @@ func (state *qpackWriterState) updateBase(e Entry, match bool) {
 	}
 }
 
+func (state *qpackWriterState) isNewlyBlocked(highestAcknowledged int) bool {
+	// A stream that was already blocking can't cause more blocking.
+	if state.wasBlocked {
+		return false
+	}
+	return state.largestBase > highestAcknowledged
+}
+
 func (state *qpackWriterState) CanEvict(e DynamicEntry) bool {
-	return e.Base() != state.smallestBase
+	return e.Base() < state.smallestBase
 }
 
 func (state *qpackWriterState) addUse(i int) {
@@ -535,9 +580,7 @@ func (encoder *QpackEncoder) writeDuplicate(w *Writer, entry DynamicEntry, state
 	if err != nil {
 		return err
 	}
-
-	state.matches[i] = inserted
-	state.updateBase(inserted, true)
+	state.recordMatch(i, inserted, nil)
 	return nil
 }
 
@@ -587,8 +630,7 @@ func (encoder *QpackEncoder) writeInsert(w *Writer, state *qpackWriterState, i i
 		return err
 	}
 
-	state.matches[i] = inserted
-	state.updateBase(inserted, true)
+	state.recordMatch(i, inserted, nil)
 	return nil
 }
 
@@ -604,19 +646,9 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint6
 	encoder.mutex.Lock()
 
 	// wasntBlocking tracks wheter this id was blocking previously.
-	wasntBlocking := false
-	maxBase := intMax
-	usage := encoder.usage.get(id)
-	state.uses = usage.next()
-	// If this stream wasn't already blocking, record that.
-	if usage.max() <= encoder.highestAcknowledged {
-		wasntBlocking = true
-		// If we are already at the limit of blocking streams, then we have to avoid
-		// adding another blocked stream.  Cap the base to the highest acknowledged.
-		if encoder.blockedStreams >= encoder.maxBlockedStreams {
-			maxBase = encoder.highestAcknowledged
-		}
-	}
+	streamUsage := encoder.usage.get(id)
+	blockingAllowed := encoder.blockedStreams < encoder.maxBlockedStreams
+	state.setupUsage(streamUsage, encoder.highestAcknowledged, blockingAllowed)
 
 	for i := range state.headers {
 		// Make sure to write into the slice rather than use a copy of each header.
@@ -624,10 +656,33 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint6
 		if h.Sensitive {
 			continue
 		}
-		match, nameMatch := encoder.table.LookupReferenceable(h.Name, h.Value, maxBase)
+
+		// Here we look for a match with the header that we can use.
+		// We split potential matches into three categories:
+		//   referenceable - these entries can be referenced safely.  This always
+		//     includes the static table.  It includes anything in the dynamic table
+		//     that is between maxBase and the marker we set near the end of the
+		//     table (which marks things as being close to eviction).  There could
+		//     be no referenceable entries.
+		//   blocking - if we find a complete match in the table in the region
+		//     that is blocked by maxBase, we stop.  We can neither reference that
+		//     entry, nor add another with the same values.
+		//   at risk - if we find a match in the table near the end, then
+		//     referencing it might cause later attempts to insert other entries to
+		//     block.  These entries are duplicated and the new entries referenced.
+		//     If this turns up a name match, a name reference to that name is used
+		//     when inserting a new entry.
+		//     The at-risk lookup considers entries that are blocked by maxBase.
+		//     However, to avoid churn on the table, unacknowledged entries are not
+		//     duplicated.
+
+		match, nameMatch := encoder.table.LookupReferenceable(h.Name, h.Value, state.maxBase)
 		if match != nil {
-			state.matches[i] = match
-			state.updateBase(match, true)
+			state.recordMatch(i, match, nameMatch)
+			continue
+		}
+
+		if encoder.table.LookupBlocked(h.Name, h.Value, state.maxBase) {
 			continue
 		}
 
@@ -636,35 +691,35 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint6
 		// encoding the header block to avoid holding down references to entries that
 		// we might want to evict.
 		var insertNameMatch Entry
-		duplicate, insertNameMatch := encoder.table.LookupExtra(h.Name, h.Value, maxBase)
+		duplicate, insertNameMatch := encoder.table.LookupExtra(h.Name, h.Value)
 		if duplicate != nil {
-			err := encoder.writeDuplicate(w, duplicate, state, i)
-			if err != nil {
-				return err
+			// Only duplicate acknowledged entries.  Refreshing entries more than
+			// once per round trip is going to churn the table too much.
+			if duplicate.Base() <= encoder.highestAcknowledged {
+				err := encoder.writeDuplicate(w, duplicate, state, i)
+				if err != nil {
+					return err
+				}
 			}
 			continue
 		}
 
-		if maxBase <= encoder.highestAcknowledged {
-			// Can't insert another entry, so force this to be a literal.
-			continue
-		}
-
+		// Use nameMatch instead of insertNameMatch for inserting on the hope that
+		// it has a shorter encoding.  Record the match on the name in case we
+		// don't (or can't) insert this entry.
 		if nameMatch != nil {
+			state.recordMatch(i, nil, nameMatch)
 			insertNameMatch = nameMatch
-			state.nameMatches[i] = nameMatch
 		}
-		if encoder.shouldIndex(h) {
+		if encoder.shouldIndex(h) && h.size() <= encoder.Table.Capacity() {
 			err := encoder.writeInsert(w, state, i, insertNameMatch)
 			if err != nil {
 				return err
 			}
-		} else {
-			state.updateBase(nameMatch, false)
 		}
 	}
 
-	if wasntBlocking && state.largestBase > encoder.highestAcknowledged {
+	if state.isNewlyBlocked(encoder.highestAcknowledged) {
 		// If this wasn't blocking before, it is now.
 		encoder.blockedStreams++
 	}

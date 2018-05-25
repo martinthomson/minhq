@@ -143,6 +143,9 @@ func TestQpackDuplicate(t *testing.T) {
 	encoder := hc.NewQpackEncoder(&updateBuf, 200, 100)
 	setupEncoder(t, encoder, &updateBuf)
 
+	// Allow the encoder to know that we got the inserts from the setup.
+	encoder.AcknowledgeInsert(encoder.Table.Base())
+
 	var headerBuf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
 		hc.HeaderField{Name: "name0", Value: "value0"},
@@ -214,7 +217,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
 		hc.HeaderField{Name: "name1", Value: "value1"})
 	assert.Nil(t, err)
-	t.Logf("Blocked Encode: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Blocked on setup: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	assert.Equal(t, []byte{}, updateBuf.Bytes())
 	expectedHeader, err := hex.DecodeString("00006ca874943f85ee3a2d287f")
@@ -232,11 +235,11 @@ func TestQpackBlockedEncode(t *testing.T) {
 
 	headerBuf.Reset()
 	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken,
-		hc.HeaderField{Name: "name1", Value: "value1"}, // this can index
-		hc.HeaderField{Name: "name3", Value: "value3"}, // this blocks
+		hc.HeaderField{Name: "name1", Value: "value1"}, // this can index now
+		hc.HeaderField{Name: "name3", Value: "value3"}, // this inserts fine
 	)
 	assert.Nil(t, err)
-	t.Logf("Blocked Encode: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Unblocked: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	expectedUpdates, err := hex.DecodeString("0b64a874959f85ee3a2d2b3f")
 	assert.Nil(t, err)
@@ -255,14 +258,16 @@ func TestQpackBlockedEncode(t *testing.T) {
 	headerBuf.Reset()
 	updateBuf.Reset()
 	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken,
-		hc.HeaderField{Name: "name4", Value: "value4"})
+		hc.HeaderField{Name: "name3", Value: "value3"}, // this uses the index
+		hc.HeaderField{Name: "name4", Value: "value4"}, // this inserts fine
+	)
 	assert.Nil(t, err)
-	t.Logf("Blocked Encode: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+	t.Logf("Same stream: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	expectedUpdates, err = hex.DecodeString("0b64a87495af85ee3a2d2b5f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("040080")
+	expectedHeader, err = hex.DecodeString("04008180")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -273,6 +278,27 @@ func TestQpackBlockedEncode(t *testing.T) {
 		{"name1", "value1"},
 	})
 
+	// While that stream is blocked, another stream won't insert or reference
+	// the entries that aren't acknowledged.
+	headerBuf.Reset()
+	updateBuf.Reset()
+	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken+1,
+		hc.HeaderField{Name: "name3", Value: "value3"}, // this produces a literal
+	)
+	assert.Nil(t, err)
+	t.Logf("Other Stream: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	assert.Equal(t, []byte{}, updateBuf.Bytes())
+	expectedHeader, err = hex.DecodeString("00006ca874959f85ee3a2d2b3f")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name4", "value4"},
+		{"name3", "value3"},
+		{"name2", "value2"},
+		{"name1", "value1"},
+	})
 }
 
 // Use a name reference and ensure that it can't be evicted.
@@ -544,4 +570,15 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 			qpackHeader: "0400818082",
 		},
 	})
+}
+
+// TestSingleRecordOverflow inserts into a table that is too small for
+// even a single record to fit.
+func TestSingleRecordOverflow(t *testing.T) {
+	var ackBuf bytes.Buffer
+	decoder := hc.NewQpackDecoder(&ackBuf, 20)
+	updates, err := hex.DecodeString("64a874943f85ee3a2d287f")
+	assert.Nil(t, err)
+	err = decoder.ReadTableUpdates(bytes.NewReader(updates))
+	assert.Equal(t, err, hc.ErrTableOverflow)
 }

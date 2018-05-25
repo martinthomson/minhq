@@ -1,5 +1,7 @@
 package hc
 
+const entryOverhead = TableCapacity(32)
+
 // Entry is a key-value pair for the HPACK table.
 type Entry interface {
 	Name() string
@@ -50,6 +52,11 @@ func (hd *BasicDynamicEntry) Index(base int) int {
 // String turns this into something presentable.
 func (hd *BasicDynamicEntry) String() string {
 	return hd.N + ": " + hd.V
+}
+
+// Size returns the size of the dynamic entry.
+func (hd *BasicDynamicEntry) Size() TableCapacity {
+	return entryOverhead + TableCapacity(len(hd.N)+len(hd.V))
 }
 
 // TableCapacity is the type of the HPACK table capacity.

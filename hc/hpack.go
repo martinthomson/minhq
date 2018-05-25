@@ -4,15 +4,9 @@ import (
 	"io"
 )
 
-const hpackOverhead = TableCapacity(32)
-
 // hpackEntry is an entry in the dynamic table.
 type hpackEntry struct {
 	BasicDynamicEntry
-}
-
-func (hd *hpackEntry) Size() TableCapacity {
-	return hpackOverhead + TableCapacity(len(hd.Name())+len(hd.Value()))
 }
 
 // Index returns the index into the HPACK table.

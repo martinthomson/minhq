@@ -21,6 +21,10 @@ func (hf HeaderField) String() string {
 	return hf.Name + ": " + hf.Value
 }
 
+func (hf HeaderField) size() TableCapacity {
+	return tableOverhead + TableCapacity(len(hf.Name)+len(hf.Value))
+}
+
 // Sanity-check header ordering.
 func validatePseudoHeaders(headers []HeaderField) error {
 	pseudo := true

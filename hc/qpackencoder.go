@@ -158,12 +158,10 @@ func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) {
 	for {
 		b, err := r.ReadBit()
 		if err != nil {
-			panic("unable to read acknowledgment")
 			return
 		}
 		v, err := r.ReadInt(7)
 		if err != nil {
-			panic("unable to read acknowledgment")
 			return
 		}
 		switch b {

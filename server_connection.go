@@ -18,15 +18,20 @@ type ServerConnection struct {
 
 // newServerConnection wraps an instance of mw.Connection with server-related capabilities.
 func newServerConnection(mwc *mw.Connection, config *Config, requests chan<- *ServerRequest) *ServerConnection {
-	hq := &ServerConnection{
+	c := &ServerConnection{
 		connection: connection{
+			config:     config,
 			Connection: *mwc,
+			ready:      make(chan struct{}),
 		},
 		maxPushID: 0,
 	}
-	hq.Init(hq)
-	go hq.serviceRequests(requests)
-	return hq
+	err := c.init(c)
+	if err != nil {
+		return nil
+	}
+	go c.serviceRequests(requests)
+	return c
 }
 
 func (c *ServerConnection) serviceRequests(requests chan<- *ServerRequest) {
@@ -80,4 +85,9 @@ func (c *ServerConnection) HandleFrame(t FrameType, f byte, r FrameReader) error
 	default:
 		return ErrInvalidFrame
 	}
+}
+
+// HandleUnidirectionalStream causes a fatal error because servers don't expect to see these.
+func (c *ServerConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) {
+	s.StopSending(0)
 }

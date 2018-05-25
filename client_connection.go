@@ -3,6 +3,7 @@ package minhq
 import (
 	"bytes"
 	"errors"
+	"io"
 	"sync"
 
 	"github.com/ekr/minq"
@@ -20,18 +21,23 @@ type ClientConnection struct {
 
 	maxPushID uint64
 	pushLock  sync.Mutex
-	promises  map[uint64]*promiseTracker
+	promises  map[uint64]*PushPromise
 }
 
 // NewClientConnection wraps an instance of minq.Connection.
 func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 	hq := &ClientConnection{
 		connection: connection{
+			config:     config,
 			Connection: *mwc,
+			ready:      make(chan struct{}),
 		},
-		promises: make(map[uint64]*promiseTracker),
+		promises: make(map[uint64]*PushPromise),
 	}
-	hq.Init(hq)
+	err := hq.init(hq)
+	if err != nil {
+		return nil
+	}
 	hq.creditPushes(config.MaxConcurrentPushes)
 	return hq
 }
@@ -43,7 +49,7 @@ func (c *ClientConnection) HandleFrame(t FrameType, f byte, r FrameReader) error
 
 // Fetch makes a request.
 func (c *ClientConnection) Fetch(method string, target string, headers ...hc.HeaderField) (*ClientRequest, error) {
-	<-c.Connected
+	<-c.ready
 	if c.GetState() != minq.StateEstablished {
 		return nil, errors.New("connection not open")
 	}
@@ -78,21 +84,53 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 	return req, nil
 }
 
-func (c *ClientConnection) registerPushPromise(pp *PushPromise) <-chan *ClientResponse {
+func (c *ClientConnection) getPushPromise(pushID uint64) *PushPromise {
 	defer c.pushLock.Unlock()
 	c.pushLock.Lock()
-	tracker := c.promises[pp.pushID]
-	if tracker == nil {
-		tracker = &promiseTracker{
-			promises:        []*PushPromise{pp},
-			responseChannel: make(chan *ClientResponse),
-			response:        nil,
-		}
-		c.promises[pp.pushID] = tracker
-	} else {
-		tracker.Add(pp)
+	promise := c.promises[pushID]
+	if promise == nil {
+		promise = &PushPromise{pushID: pushID, responseChannel: make(chan *ClientResponse)}
+		c.promises[pushID] = promise
 	}
-	return tracker.responseChannel
+	return promise
+}
+
+func (c *ClientConnection) handlePushStream(s *recvStream) {
+	pushID, err := s.ReadVarint()
+	if err != nil {
+		c.FatalError(0)
+		return
+	}
+
+	resp := &ClientResponse{
+		Request:         nil,
+		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
+	}
+
+	err = resp.read(s, func(headers []hc.HeaderField) error {
+		err := resp.setHeaders(headers)
+		if err != nil {
+			return err
+		}
+		promise := c.getPushPromise(pushID)
+		promise.responseChannel <- resp
+		return nil
+	}, func(t FrameType, f byte, r io.Reader) error {
+		return ErrUnsupportedFrame
+	})
+	if err != nil {
+		c.FatalError(0)
+		return
+	}
+}
+
+func (c *ClientConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) {
+	switch t {
+	case unidirectionalStreamPush:
+		c.handlePushStream(s)
+	default:
+		s.StopSending(0)
+	}
 }
 
 func (c *ClientConnection) creditPushes(incr uint64) error {
@@ -117,7 +155,7 @@ func (pt *promiseTracker) Add(pp *PushPromise) {
 	pt.promises = append(pt.promises, pp)
 }
 
-// Fulfill fills out the response and lets all the promises know about it.
+// Fulfill fills out the response.
 func (pt *promiseTracker) Fulfill(resp *ClientResponse) {
 	pt.response = resp
 	pt.responseChannel <- resp

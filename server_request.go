@@ -15,8 +15,8 @@ type ServerRequest struct {
 	C      *ServerConnection
 	s      *stream
 	ID     uint64
-	Method string
-	Target *url.URL
+	method string
+	target *url.URL
 	IncomingMessage
 }
 
@@ -25,10 +25,18 @@ func newServerRequest(c *ServerConnection, s *stream) *ServerRequest {
 		C:               c,
 		s:               s,
 		ID:              0,
-		Method:          "",
-		Target:          nil,
+		method:          "",
+		target:          nil,
 		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
 	}
+}
+
+func (req *ServerRequest) Method() string {
+	return req.method
+}
+
+func (req *ServerRequest) Target() *url.URL {
+	return req.target
 }
 
 func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
@@ -52,12 +60,13 @@ type hasHeaders interface {
 func (req *ServerRequest) setHeaders(headers []hc.HeaderField) error {
 	req.Headers = headers
 	var err error
-	req.Method, req.Target, err = req.Headers.getMethodAndTarget()
+	req.method, req.target, err = req.Headers.getMethodAndTarget()
 	return err
 }
 
 func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 	s *sendStream, push *ServerPushRequest) (*ServerResponse, error) {
+	<-req.C.ready
 	allHeaders := append([]hc.HeaderField{
 		hc.HeaderField{Name: ":status", Value: strconv.Itoa(statusCode)},
 	}, headers...)
@@ -82,7 +91,7 @@ func (req *ServerRequest) Respond(statusCode int, headers ...hc.HeaderField) (*S
 
 // Push creates a new server push.
 func (req *ServerRequest) Push(method string, target string, headers ...hc.HeaderField) (*ServerPushRequest, error) {
-	url, allHeaders, err := buildRequestHeaderFields(method, req.Target, target, headers)
+	url, allHeaders, err := buildRequestHeaderFields(method, req.Target(), target, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -92,27 +101,39 @@ func (req *ServerRequest) Push(method string, target string, headers ...hc.Heade
 		return nil, err
 	}
 
-	var headerBuf bytes.Buffer
-	headerWriter := NewFrameWriter(&headerBuf)
-	_, err = headerWriter.WriteVarint(pushID)
-	if err != nil {
-		return nil, err
-	}
-	err = req.C.encoder.WriteHeaderBlock(headerWriter, req.s.Id(), allHeaders...)
-	if err != nil {
-		return nil, err
-	}
-	_, err = req.s.WriteFrame(framePushPromise, 0, headerBuf.Bytes())
-	if err != nil {
-		return nil, err
-	}
-
-	return &ServerPushRequest{
+	push := &ServerPushRequest{
 		Target:  url,
 		Request: req,
 		PushID:  pushID,
 		Headers: allHeaders,
-	}, nil
+	}
+
+	err = req.writePushPromise(push)
+	return push, nil
+}
+
+// ReferencePush takes an existing PushPromise and references the same push ID.
+// This ensures that the client gets the promise in context without creating a
+// new push.
+func (req *ServerRequest) ReferencePush(push *ServerPushRequest) error {
+	return req.writePushPromise(push)
+}
+
+func (req *ServerRequest) writePushPromise(push *ServerPushRequest) error {
+	<-req.C.ready
+
+	var headerBuf bytes.Buffer
+	headerWriter := NewFrameWriter(&headerBuf)
+	_, err := headerWriter.WriteVarint(push.PushID)
+	if err != nil {
+		return err
+	}
+	err = req.C.encoder.WriteHeaderBlock(headerWriter, req.s.Id(), push.Headers...)
+	if err != nil {
+		return err
+	}
+	_, err = req.s.WriteFrame(framePushPromise, 0, headerBuf.Bytes())
+	return err
 }
 
 // ServerResponse can be used to write response bodies and trailers.
@@ -127,6 +148,11 @@ type ServerResponse struct {
 // Push just forwards the server push to ServerRequest.Push.
 func (resp *ServerResponse) Push(method string, target string, headers ...hc.HeaderField) (*ServerPushRequest, error) {
 	return resp.Request.Push(method, target, headers...)
+}
+
+// ReferencePush just forwards the server push to ServerRequest.ReferencePush.
+func (resp *ServerResponse) ReferencePush(push *ServerPushRequest) error {
+	return resp.Request.ReferencePush(push)
 }
 
 // ServerPushRequest is a more limited version of ServerRequest.

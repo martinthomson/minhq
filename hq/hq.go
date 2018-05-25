@@ -156,7 +156,7 @@ func runClient(config *minhq.Config, args *clientArguments) {
 			request.Close()
 		}
 
-		response := <-request.Response
+		response := request.Response()
 		fmt.Println(response)
 		fmt.Println("[[[")
 		_, err = io.Copy(os.Stdout, response)

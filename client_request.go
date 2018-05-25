@@ -1,11 +1,17 @@
 package minhq
 
 import (
-	"github.com/martinthomson/minhq/hc"
+	"errors"
 	"io"
 	"net/url"
 	"strconv"
+	"sync"
+
+	"github.com/martinthomson/minhq/hc"
 )
+
+// ErrInvalidPushPromise occurs if a push promise isn't well formed.
+var ErrInvalidPushPromise = errors.New("invalid push promise")
 
 type requestID struct {
 	id    uint64
@@ -81,15 +87,12 @@ func (req *ClientRequest) handlePushPromise(s *stream, c *ClientConnection, f by
 		return err
 	}
 
-	pp := &PushPromise{
-		headers: nil,
-		pushID:  pushID,
-	}
+	pp := c.getPushPromise(pushID)
 	err = pp.setHeaders(headers)
 	if err != nil {
 		return err
 	}
-	pp.responseChannel = c.registerPushPromise(pp)
+
 	req.pushes <- pp
 	return nil
 }
@@ -123,6 +126,7 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		s.abort()
 		return
 	}
+	close(req.pushes)
 }
 
 // ClientResponse includes all that a client needs to handle a response.
@@ -141,31 +145,43 @@ func (resp *ClientResponse) setHeaders(headers []hc.HeaderField) error {
 }
 
 // PushPromise is what you get when you receive a push promise.
+// Note that the same object is returned to different requests if the server
+// promises with the same identifier in response to multiple requests.  See
+// Response() for the consequences of that.
 type PushPromise struct {
+	lock    sync.RWMutex
 	headers headerFieldArray
 	method  string
 	target  *url.URL
 	pushID  uint64
 
-	responseChannel <-chan *ClientResponse
+	responseChannel chan *ClientResponse
 }
 
 // Method returns the obvious thing.
 func (pp *PushPromise) Method() string {
+	defer pp.lock.RUnlock()
+	pp.lock.RLock()
 	return pp.method
 }
 
 // Target returns the obvious thing.
 func (pp *PushPromise) Target() *url.URL {
+	defer pp.lock.RUnlock()
+	pp.lock.RLock()
 	return pp.target
 }
 
 // Headers returns the headers from the promise.
 func (pp *PushPromise) Headers() []hc.HeaderField {
+	defer pp.lock.RUnlock()
+	pp.lock.RLock()
 	return pp.headers[:]
 }
 
 func (pp *PushPromise) setHeaders(h []hc.HeaderField) error {
+	defer pp.lock.Unlock()
+	pp.lock.Lock()
 	pp.headers = h
 	var err error
 	pp.method, pp.target, err = pp.headers.getMethodAndTarget()

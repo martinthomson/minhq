@@ -187,5 +187,6 @@ func (c *Connection) CreateStream() minq.Stream {
 func (c *Connection) CreateSendStream() minq.SendStream {
 	result := make(chan minq.SendStream)
 	c.ops.Add(&createSendStreamRequest{c, result})
-	return <-result
+	s := <-result
+	return s
 }

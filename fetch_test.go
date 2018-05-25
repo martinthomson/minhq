@@ -57,7 +57,8 @@ func TestFetch(t *testing.T) {
 
 	serverRequest := <-cs.server.Requests
 	assert.Equal(t, "Test", serverRequest.GetHeader("user-AGENT"))
-	assert.Equal(t, url, serverRequest.Target.String())
+	assert.Equal(t, "GET", serverRequest.Method())
+	assert.Equal(t, url, serverRequest.Target().String())
 	_, err = io.Copy(ioutil.Discard, serverRequest)
 	assert.Nil(t, err)
 	assert.Nil(t, <-serverRequest.Trailers)
@@ -91,6 +92,9 @@ func TestPushOnRequest(t *testing.T) {
 	pushResponse, err := pushRequest.Respond(200, hc.HeaderField{Name: "Push-ID", Value: "123"})
 	assert.Nil(t, err)
 	assert.Nil(t, pushResponse.Close())
+
+	promise := <-clientRequest.Pushes
+	assert.Equal(t, promise.Target().String(), "https://example.com/other")
 
 	serverResponse, err := serverRequest.Respond(500)
 	assert.Nil(t, err)

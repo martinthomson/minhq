@@ -43,6 +43,7 @@ var (
 type Config struct {
 	DecoderTableCapacity hc.TableCapacity
 	ConcurrentDecoders   uint16
+	MaxConcurrentPushes  uint64
 }
 
 // FrameHandler is used by subclasses of connection to deal with frames that only they handle.
@@ -69,6 +70,7 @@ func (c *connection) Init(fh FrameHandler) {
 	c.unknownFrameHandler = fh
 
 	c.controlStream = newSendStream(c.CreateSendStream())
+	c.sendSettings()
 	c.encoder = hc.NewQpackEncoder(c.CreateSendStream(), 0, 0)
 	c.decoder = hc.NewQpackDecoder(c.CreateSendStream(), c.config.DecoderTableCapacity)
 
@@ -95,21 +97,23 @@ func (c *connection) handlePriority(f byte, r io.Reader) error {
 	return nil
 }
 
-// This spits out a SETTINGS frame and then sits there reading the control
-// stream until it encounters an error.
-func (c *connection) serviceControlStream(controlStream *recvStream) {
+func (c *connection) sendSettings() error {
 	var buf bytes.Buffer
 	sw := settingsWriter{&c.config}
 	n, err := sw.WriteTo(&buf)
-	if err != nil || n != int64(buf.Len()) {
-		c.FatalError(ErrWtf)
-		return
+	if err != nil {
+		return err
+	}
+	if n != int64(buf.Len()) {
+		return ErrStreamBlocked
 	}
 	_, err = c.controlStream.WriteFrame(frameSettings, 0, buf.Bytes())
-	if err != nil {
-		c.FatalError(ErrWtf)
-		return
-	}
+	return err
+}
+
+// This spits out a SETTINGS frame and then sits there reading the control
+// stream until it encounters an error.
+func (c *connection) serviceControlStream(controlStream *recvStream) {
 
 	t, f, r, err := controlStream.ReadFrame()
 	if err != nil {

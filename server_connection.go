@@ -54,6 +54,7 @@ func (c *ServerConnection) handleMaxPushID(f byte, r FrameReader) error {
 
 	c.pushIDLock.Lock()
 	defer c.pushIDLock.Unlock()
+	println("MAX_PUSH_ID", n)
 	if n > c.maxPushID {
 		c.maxPushID = n
 	}
@@ -63,6 +64,7 @@ func (c *ServerConnection) handleMaxPushID(f byte, r FrameReader) error {
 func (c *ServerConnection) getNextPushID() (uint64, error) {
 	c.pushIDLock.RLock()
 	defer c.pushIDLock.RUnlock()
+	println("GET MAX_PUSH_ID", c.nextPushID, c.maxPushID)
 	if c.nextPushID >= c.maxPushID {
 		return 0, errors.New("No push IDs available")
 	}

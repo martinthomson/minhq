@@ -19,9 +19,31 @@ const (
 	frameSettings    = FrameType(4)
 	framePushPromise = FrameType(5)
 	frameGoaway      = FrameType(7)
-	frameHeaderAck   = FrameType(8)
 	frameMaxPushID   = FrameType(13)
 )
+
+// String produces the strings from the spec.
+func (ft FrameType) String() string {
+	switch ft {
+	case frameData:
+		return "DATA"
+	case frameHeaders:
+		return "HEADERS"
+	case framePriority:
+		return "PRIORITY"
+	case frameCancelPush:
+		return "CANCEL_PUSH"
+	case frameSettings:
+		return "SETTINGS"
+	case framePushPromise:
+		return "PUSH_PROMISE"
+	case frameGoaway:
+		return "GOAWAY"
+	case frameMaxPushID:
+		return "MAX_PUSH_ID"
+	}
+	return "UNKNOWN!"
+}
 
 // ErrUnsupportedFrame signals that an unsupported frame was received.
 var ErrUnsupportedFrame = errors.New("Unsupported frame type received")

@@ -29,6 +29,7 @@ func newClientServerPair(t *testing.T) *clientServer {
 	config := &minhq.Config{
 		DecoderTableCapacity: 4096,
 		ConcurrentDecoders:   10,
+		MaxConcurrentPushes:  10,
 	}
 	var server *minhq.Server
 	cs := test.NewClientServerPair(func(ms *minq.Server) *mw.Server {
@@ -49,7 +50,8 @@ func TestFetch(t *testing.T) {
 
 	url := "https://example.com/%2fhello"
 	clientRequest, err := cs.client.Fetch("GET", url,
-		hc.HeaderField{Name: "User-Agent", Value: "Test"})
+		hc.HeaderField{Name: "User-Agent", Value: "Test"},
+	)
 	assert.Nil(t, err)
 	assert.Nil(t, clientRequest.Close())
 
@@ -67,6 +69,30 @@ func TestFetch(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())
 
-	clientResponse := <-clientRequest.Response
+	clientResponse := clientRequest.Response()
 	assert.Equal(t, 200, clientResponse.Status)
+}
+
+func TestPushOnRequest(t *testing.T) {
+	cs := newClientServerPair(t)
+	defer cs.Close()
+
+	url := "https://example.com/push"
+	clientRequest, err := cs.client.Fetch("POST", url)
+	assert.Nil(t, err)
+	assert.Nil(t, clientRequest.Close())
+
+	serverRequest := <-cs.server.Requests
+
+	pushRequest, err := serverRequest.Push("GET", "/other",
+		hc.HeaderField{Name: "Push-ID", Value: "123"},
+	)
+	assert.Nil(t, err)
+	pushResponse, err := pushRequest.Respond(200, hc.HeaderField{Name: "Push-ID", Value: "123"})
+	assert.Nil(t, err)
+	assert.Nil(t, pushResponse.Close())
+
+	serverResponse, err := serverRequest.Respond(500)
+	assert.Nil(t, err)
+	assert.Nil(t, serverResponse.Close())
 }

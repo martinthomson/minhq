@@ -10,16 +10,22 @@ import (
 	"github.com/martinthomson/minhq/hc"
 )
 
-func buildRequestHeaderFields(method string, target string, headers []hc.HeaderField) ([]hc.HeaderField, error) {
-	u, err := url.Parse(target)
+func buildRequestHeaderFields(method string, base *url.URL, target string, headers []hc.HeaderField) (*url.URL, []hc.HeaderField, error) {
+	var u *url.URL
+	var err error
+	if base != nil {
+		u, err = base.Parse(target)
+	} else {
+		u, err = url.Parse(target)
+	}
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if u.Scheme != "https" {
-		return nil, errors.New("No support for non-https URLs")
+		return nil, nil, errors.New("No support for non-https URLs")
 	}
 
-	return append([]hc.HeaderField{
+	return u, append([]hc.HeaderField{
 		hc.HeaderField{Name: ":authority", Value: u.Host},
 		hc.HeaderField{Name: ":path", Value: u.EscapedPath()},
 		hc.HeaderField{Name: ":method", Value: method},
@@ -61,6 +67,38 @@ func (a headerFieldArray) GetHeader(n string) string {
 	return v
 }
 
+func (h headerFieldArray) getMethodAndTarget() (string, *url.URL, error) {
+	method := h.GetHeader(":method")
+	if method == "" {
+		return "", nil, errors.New("Missing :method from request")
+	}
+
+	u := url.URL{
+		Scheme: h.GetHeader(":scheme"),
+		Host:   h.GetHeader(":authority"),
+	}
+	if u.Scheme == "" {
+		return "", nil, errors.New("Missing :scheme from request")
+	}
+	if u.Host == "" {
+		u.Host = h.GetHeader("Host")
+	}
+	if u.Host == "" {
+		return "", nil, errors.New("Missing :authority/Host from request")
+	}
+	p := h.GetHeader(":path")
+	if p == "" {
+		return "", nil, errors.New("Missing :path from request")
+	}
+	// Let url.Parse() handle all the nasty corner cases in path syntax.
+	withPath, err := u.Parse(p)
+	if err != nil {
+		return "", nil, err
+	}
+	return method, withPath, nil
+}
+
+type initialHeadersHandler func(headers []hc.HeaderField) error
 type incomingMessageFrameHandler func(FrameType, byte, io.Reader) error
 
 // IncomingMessage is the common parts of inbound messages (requests for
@@ -88,11 +126,13 @@ func newIncomingMessage(decoder *hc.QpackDecoder, headers []hc.HeaderField) Inco
 	}
 }
 
-func (msg *IncomingMessage) read(s *recvStream, frameHandler incomingMessageFrameHandler) error {
+func (msg *IncomingMessage) read(s *recvStream, headersHandler initialHeadersHandler,
+	frameHandler incomingMessageFrameHandler) error {
 	defer close(msg.trailers)
 	defer msg.concatenatingReader.Close()
 
-	done := false
+	beforeFirstHeaders := true
+	afterTrailers := false
 	for {
 		t, f, r, err := s.ReadFrame()
 		if err == io.EOF {
@@ -101,20 +141,37 @@ func (msg *IncomingMessage) read(s *recvStream, frameHandler incomingMessageFram
 		if err != nil {
 			return err
 		}
-		if done {
+		if afterTrailers {
 			return ErrInvalidFrame
 		}
 
 		switch t {
 		case frameData:
+			if beforeFirstHeaders {
+				return ErrInvalidFrame
+			}
 			msg.concatenatingReader.Add(r)
+
 		case frameHeaders:
-			done = true
+			if f != 0 {
+				return ErrInvalidFrame
+			}
 			headers, err := msg.decoder.ReadHeaderBlock(r, s.Id())
 			if err != nil {
 				return err
 			}
-			msg.trailers <- headers
+
+			if beforeFirstHeaders {
+				err = headersHandler(headers)
+				if err != nil {
+					return err
+				}
+				beforeFirstHeaders = false
+			} else {
+				msg.trailers <- headers
+				afterTrailers = true
+			}
+
 		default:
 			err := frameHandler(t, f, r)
 			if err != nil {
@@ -182,7 +239,7 @@ func (cat *concatenatingReader) Read(p []byte) (int, error) {
 // OutgoingMessage contains the common parts of outgoing messages (requests for
 // clients, responses for servers).
 type OutgoingMessage struct {
-	Headers headerFieldArray
+	headers headerFieldArray
 
 	s *sendStream
 
@@ -190,15 +247,19 @@ type OutgoingMessage struct {
 	encoder *hc.QpackEncoder
 }
 
+var _ io.WriteCloser = &OutgoingMessage{}
+
 func newOutgoingMessage(c *connection, s *sendStream, headers []hc.HeaderField) OutgoingMessage {
 	return OutgoingMessage{
-		Headers: headers,
+		headers: headers,
 		s:       s,
 		encoder: c.encoder,
 	}
 }
 
-var _ io.WriteCloser = &OutgoingMessage{}
+func (msg *OutgoingMessage) Headers() []hc.HeaderField {
+	return msg.headers[:]
+}
 
 // Write fulfils the io.Writer contract.
 func (msg *OutgoingMessage) Write(p []byte) (int, error) {
@@ -241,5 +302,5 @@ func (msg *OutgoingMessage) Close() error {
 
 // String just formats headers.
 func (msg *OutgoingMessage) String() string {
-	return msg.Headers.String()
+	return msg.headers.String()
 }

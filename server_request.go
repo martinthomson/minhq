@@ -16,7 +16,7 @@ type ServerRequest struct {
 	s      *stream
 	ID     uint64
 	Method string
-	Target url.URL
+	Target *url.URL
 	IncomingMessage
 }
 
@@ -26,27 +26,17 @@ func newServerRequest(c *ServerConnection, s *stream) *ServerRequest {
 		s:               s,
 		ID:              0,
 		Method:          "",
-		Target:          url.URL{},
+		Target:          nil,
 		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
 	}
 }
 
 func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
-	t, f, r, err := req.s.ReadFrame()
-	if err != nil || t != frameHeaders || f != 0 {
-		req.s.abort()
-		return
-	}
-
-	headers, err := req.C.decoder.ReadHeaderBlock(r, req.s.Id())
-	if err != nil {
-		req.s.abort()
-		return
-	}
-
-	req.setHeaders(headers)
-	requests <- req
-	err = req.read(&req.s.recvStream, func(t FrameType, f byte, r io.Reader) error {
+	err := req.read(&req.s.recvStream, func(headers []hc.HeaderField) error {
+		req.setHeaders(headers)
+		requests <- req
+		return nil
+	}, func(t FrameType, f byte, r io.Reader) error {
 		return ErrUnsupportedFrame
 	})
 	if err != nil {
@@ -55,38 +45,15 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 	}
 }
 
+type hasHeaders interface {
+	GetHeader(n string) string
+}
+
 func (req *ServerRequest) setHeaders(headers []hc.HeaderField) error {
 	req.Headers = headers
-
-	req.Method = req.GetHeader(":method")
-	if req.Method == "" {
-		return errors.New("Missing :method from request")
-	}
-
-	u := url.URL{
-		Scheme: req.GetHeader(":scheme"),
-		Host:   req.GetHeader(":authority"),
-	}
-	if u.Scheme == "" {
-		return errors.New("Missing :scheme from request")
-	}
-	if u.Host == "" {
-		u.Host = req.GetHeader("Host")
-	}
-	if u.Host == "" {
-		return errors.New("Missing :authority/Host from request")
-	}
-	p := req.GetHeader(":path")
-	if p == "" {
-		return errors.New("Missing :path from request")
-	}
-	// Let url.Parse() handle all the nasty corner cases in path syntax.
-	withPath, err := u.Parse(p)
-	if err != nil {
-		return err
-	}
-	req.Target = *withPath
-	return nil
+	var err error
+	req.Method, req.Target, err = req.Headers.getMethodAndTarget()
+	return err
 }
 
 func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
@@ -114,8 +81,8 @@ func (req *ServerRequest) Respond(statusCode int, headers ...hc.HeaderField) (*S
 }
 
 // Push creates a new server push.
-func (req *ServerRequest) Push(method string, target string, headers []hc.HeaderField) (*ServerPushRequest, error) {
-	allHeaders, err := buildRequestHeaderFields(method, target, headers)
+func (req *ServerRequest) Push(method string, target string, headers ...hc.HeaderField) (*ServerPushRequest, error) {
+	url, allHeaders, err := buildRequestHeaderFields(method, req.Target, target, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -141,6 +108,7 @@ func (req *ServerRequest) Push(method string, target string, headers []hc.Header
 	}
 
 	return &ServerPushRequest{
+		Target:  url,
 		Request: req,
 		PushID:  pushID,
 		Headers: allHeaders,
@@ -157,19 +125,20 @@ type ServerResponse struct {
 }
 
 // Push just forwards the server push to ServerRequest.Push.
-func (resp *ServerResponse) Push(method string, target string, headers []hc.HeaderField) (*ServerPushRequest, error) {
-	return resp.Request.Push(method, target, headers)
+func (resp *ServerResponse) Push(method string, target string, headers ...hc.HeaderField) (*ServerPushRequest, error) {
+	return resp.Request.Push(method, target, headers...)
 }
 
 // ServerPushRequest is a more limited version of ServerRequest.
 type ServerPushRequest struct {
+	Target  *url.URL
 	Request *ServerRequest
 	PushID  uint64
 	Headers []hc.HeaderField
 }
 
 // Respond on ServerPushRequest is functionally identical to the same function on ServerRequest.
-func (push *ServerPushRequest) Respond(statusCode int, headers []hc.HeaderField) (*ServerResponse, error) {
+func (push *ServerPushRequest) Respond(statusCode int, headers ...hc.HeaderField) (*ServerResponse, error) {
 	send := push.Request.C.CreateSendStream()
 	if send == nil {
 		return nil, errors.New("No available send streams for push response")

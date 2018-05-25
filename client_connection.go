@@ -1,7 +1,9 @@
 package minhq
 
 import (
+	"bytes"
 	"errors"
+	"sync"
 
 	"github.com/ekr/minq"
 	"github.com/martinthomson/minhq/hc"
@@ -15,6 +17,10 @@ var ErrStreamBlocked = errors.New("Unable to open a new stream for the request")
 // ClientConnection is a connection specialized for use by clients.
 type ClientConnection struct {
 	connection
+
+	maxPushID    uint64
+	pushLock     sync.Mutex
+	pushChannels map[uint64]chan *ClientResponse
 }
 
 // NewClientConnection wraps an instance of minq.Connection.
@@ -23,8 +29,10 @@ func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 		connection: connection{
 			Connection: *mwc,
 		},
+		pushChannels: make(map[uint64]chan *ClientResponse),
 	}
 	hq.Init(hq)
+	hq.creditPushes(config.MaxConcurrentPushes)
 	return hq
 }
 
@@ -40,7 +48,7 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 		return nil, errors.New("connection not open")
 	}
 
-	allHeaders, err := buildRequestHeaderFields(method, target, headers)
+	url, allHeaders, err := buildRequestHeaderFields(method, nil, target, headers)
 	if err != nil {
 		return nil, err
 	}
@@ -51,9 +59,14 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 	}
 
 	responseChannel := make(chan *ClientResponse)
+	pushes := make(chan *PushPromise)
 	req := &ClientRequest{
-		Response:        responseChannel,
+		method:          method,
+		target:          url,
+		response:        responseChannel,
 		OutgoingMessage: newOutgoingMessage(&c.connection, &s.sendStream, allHeaders),
+		Pushes:          pushes,
+		pushes:          pushes,
 	}
 
 	err = req.writeHeaderBlock(allHeaders)
@@ -63,4 +76,25 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 
 	go req.readResponse(s, c, responseChannel)
 	return req, nil
+}
+
+func (c *ClientConnection) registerPushPromise(pp *PushPromise) <-chan *ClientResponse {
+	defer c.pushLock.Unlock()
+	c.pushLock.Lock()
+	ch := c.pushChannels[pp.pushID]
+	if ch == nil {
+		ch = make(chan *ClientResponse)
+		c.pushChannels[pp.pushID] = ch
+	}
+	return ch
+}
+
+func (c *ClientConnection) creditPushes(incr uint64) error {
+	c.maxPushID += incr
+
+	var buf bytes.Buffer
+	w := NewFrameWriter(&buf)
+	w.WriteVarint(c.maxPushID)
+	_, err := c.controlStream.WriteFrame(frameMaxPushID, 0, buf.Bytes())
+	return err
 }

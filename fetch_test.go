@@ -22,7 +22,7 @@ type clientServer struct {
 }
 
 func (cs *clientServer) Close() error {
-	return cs.Close()
+	return cs.cs.Close()
 }
 
 func newClientServerPair(t *testing.T) *clientServer {
@@ -45,7 +45,7 @@ func newClientServerPair(t *testing.T) *clientServer {
 
 func TestFetch(t *testing.T) {
 	cs := newClientServerPair(t)
-	//defer cs.Close()
+	defer cs.Close()
 
 	url := "https://example.com/%2fhello"
 	clientRequest, err := cs.client.Fetch("GET", url,

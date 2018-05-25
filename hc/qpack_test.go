@@ -421,25 +421,35 @@ func TestQpackDecoderOrdered(t *testing.T) {
 type notifyingReader struct {
 	reader io.Reader
 	signal *sync.Cond
-	done   bool
+	done   chan struct{}
 }
 
 func NewNotifyingReader(p []byte) *notifyingReader {
 	return &notifyingReader{bytes.NewReader(p),
-		sync.NewCond(&sync.Mutex{}), false}
+		sync.NewCond(&sync.Mutex{}), make(chan struct{})}
 }
 
 func (nr *notifyingReader) Read(p []byte) (int, error) {
 	nr.signal.Broadcast()
-	nr.done = true
+	select {
+	case <-nr.done:
+		// We're done here.
+	default:
+		close(nr.done)
+	}
 	return nr.reader.Read(p)
 }
 
 func (nr *notifyingReader) Wait() {
-	for !nr.done {
-		nr.signal.L.Lock()
-		nr.signal.Wait()
-		nr.signal.L.Unlock()
+	for {
+		select {
+		case <-nr.done:
+			return
+		default:
+			nr.signal.L.Lock()
+			nr.signal.Wait()
+			nr.signal.L.Unlock()
+		}
 	}
 }
 
@@ -484,13 +494,13 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 		assert.Nil(t, err)
 		nr := NewNotifyingReader(headerBytes)
 
-		go func(tc testCase, r io.Reader) {
+		go func(i int, tc testCase, r io.Reader) {
 			defer headerDone.Done()
 			headers, err := decoder.ReadHeaderBlock(r, uint64(i))
 			assert.Nil(t, err)
 
 			assert.Equal(t, tc.headers, headers)
-		}(tc, nr)
+		}(i, tc, nr)
 
 		// After setting up the header block to decode, feed the control stream to the
 		// reader.  First, wait for the header block reader to take a byte.

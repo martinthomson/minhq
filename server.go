@@ -27,14 +27,8 @@ type Server struct {
 }
 
 func (s *Server) serviceConnections(requests chan<- *ServerRequest, connections chan<- *ServerConnection) {
-	for {
-		select {
-		case c := <-s.Server.Connections:
-			if c == nil {
-				return
-			}
-			connections <- newServerConnection(c, s.config, requests)
-		}
+	for c := range s.Server.Connections {
+		connections <- newServerConnection(c, s.config, requests)
 	}
 }
 

@@ -138,7 +138,7 @@ func (c *connection) init(handler connectionHandler) error {
 
 // FatalError is a helper that passes on HTTP errors to the underlying connection.
 func (c *connection) FatalError(e HTTPError) {
-	c.Close()
+	c.Error(uint16(e), "")
 }
 
 func (c *connection) handlePriority(f byte, r io.Reader) error {

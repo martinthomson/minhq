@@ -26,7 +26,7 @@ func (s *stream) Id() uint64 {
 // abort is the option of last resort.
 func (s *stream) abort() {
 	s.Reset(ErrQuicWtf)
-	s.StopSending(ErrQuicWtf) // TODO change error codes to something sensible.
+	s.StopSending(uint16(ErrHttpInternalError))
 }
 
 type sendStream struct {

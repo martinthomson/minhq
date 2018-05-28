@@ -101,9 +101,9 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 	responseChannel chan<- *ClientResponse) {
 	resp := &ClientResponse{
 		Request:         req,
-		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
+		IncomingMessage: newIncomingMessage(&s.recvStream, c.connection.decoder, nil),
 	}
-	err := resp.read(&s.recvStream, func(headers []hc.HeaderField) error {
+	err := resp.read(func(headers []hc.HeaderField) error {
 		err := resp.setHeaders(headers)
 		if err != nil {
 			return err
@@ -156,6 +156,7 @@ type PushPromise struct {
 	pushID  uint64
 
 	responseChannel chan *ClientResponse
+	response        *ClientResponse
 }
 
 // Method returns the obvious thing.
@@ -188,6 +189,20 @@ func (pp *PushPromise) setHeaders(h []hc.HeaderField) error {
 	return err
 }
 
+func (pp *PushPromise) fulfill(resp *ClientResponse) {
+	defer pp.lock.Unlock()
+	pp.lock.Lock()
+	pp.responseChannel <- resp
+	pp.response = resp
+	close(pp.responseChannel)
+}
+
+func (pp *PushPromise) isFulfilled() bool {
+	defer pp.lock.RUnlock()
+	pp.lock.RLock()
+	return pp.response != nil
+}
+
 // Reponse returns a response.  Note that because multiple push promises
 // can be made for the same response, only one call to this function will
 // receive a response.  Others receive a nil value.  This prevents
@@ -197,7 +212,8 @@ func (pp *PushPromise) Response() *ClientResponse {
 }
 
 func (pp *PushPromise) Cancel() error {
-	// TODO - note that it will be tricky to work out if there is an open
-	// stream for the push.
-	return nil
+	if pp.isFulfilled() {
+		pp.response.s.StopSending(uint16(ErrHttpRequestCancelled))
+	}
+	return ErrTooLarge
 }

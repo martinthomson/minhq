@@ -27,7 +27,7 @@ func newServerRequest(c *ServerConnection, s *stream) *ServerRequest {
 		ID:              0,
 		method:          "",
 		target:          nil,
-		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
+		IncomingMessage: newIncomingMessage(&s.recvStream, c.connection.decoder, nil),
 	}
 }
 
@@ -40,7 +40,7 @@ func (req *ServerRequest) Target() *url.URL {
 }
 
 func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
-	err := req.read(&req.s.recvStream, func(headers []hc.HeaderField) error {
+	err := req.read(func(headers []hc.HeaderField) error {
 		req.setHeaders(headers)
 		requests <- req
 		return nil
@@ -167,10 +167,14 @@ type ServerPushRequest struct {
 func (push *ServerPushRequest) Respond(statusCode int, headers ...hc.HeaderField) (*ServerResponse, error) {
 	send := push.Request.C.CreateSendStream()
 	if send == nil {
-		return nil, errors.New("No available send streams for push response")
+		return nil, errors.New("No avaliable send streams for push response")
 	}
 	s := newSendStream(send)
-	_, err := s.WriteVarint(push.PushID)
+	err := s.WriteByte(byte(unidirectionalStreamPush))
+	if err != nil {
+		return nil, err
+	}
+	_, err = s.WriteVarint(push.PushID)
 	if err != nil {
 		return nil, err
 	}

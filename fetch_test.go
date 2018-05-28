@@ -1,9 +1,11 @@
 package minhq_test
 
 import (
+	"bytes"
 	"io"
 	"io/ioutil"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/ekr/minq"
@@ -85,18 +87,53 @@ func TestPushOnRequest(t *testing.T) {
 
 	serverRequest := <-cs.server.Requests
 
-	pushRequest, err := serverRequest.Push("GET", "/other",
+	serverPromise, err := serverRequest.Push("GET", "/other",
 		hc.HeaderField{Name: "Push-ID", Value: "123"},
 	)
 	assert.Nil(t, err)
-	pushResponse, err := pushRequest.Respond(200, hc.HeaderField{Name: "Push-ID", Value: "123"})
+	serverPushResponse, err := serverPromise.Respond(200, hc.HeaderField{Name: "Push-ID", Value: "123"})
 	assert.Nil(t, err)
-	assert.Nil(t, pushResponse.Close())
+	pushMessage := []byte{1, 2, 3}
+	_, err = serverPushResponse.Write(pushMessage)
+	assert.Nil(t, err)
+	assert.Nil(t, serverPushResponse.Close())
 
 	promise := <-clientRequest.Pushes
 	assert.Equal(t, promise.Target().String(), "https://example.com/other")
 
 	serverResponse, err := serverRequest.Respond(500)
 	assert.Nil(t, err)
+	responseMessage := []byte{6, 7, 8, 9}
+	_, err = serverResponse.Write(responseMessage)
+	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())
+
+	// From this point, we receive the promised response in parallel to the
+	// response, so we're into WaitGroup territory...
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	go func() {
+		//defer t.Logf("promise reading done")
+		defer wg.Done()
+		clientPushResponse := promise.Response()
+		assert.Equal(t, clientPushResponse.Status, 200)
+		var buf bytes.Buffer
+		_, err := io.Copy(&buf, clientPushResponse)
+		assert.Nil(t, err)
+		assert.Equal(t, buf.Bytes(), pushMessage)
+	}()
+
+	go func() {
+		//defer t.Logf("request reading done")
+		defer wg.Done()
+		response := clientRequest.Response()
+		assert.Equal(t, response.Status, 500)
+		var buf bytes.Buffer
+		_, err := io.Copy(&buf, response)
+		assert.Nil(t, err)
+		assert.Equal(t, buf.Bytes(), responseMessage)
+	}()
+
+	wg.Wait()
 }

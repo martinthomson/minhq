@@ -98,22 +98,27 @@ func (c *ClientConnection) getPushPromise(pushID uint64) *PushPromise {
 func (c *ClientConnection) handlePushStream(s *recvStream) {
 	pushID, err := s.ReadVarint()
 	if err != nil {
-		c.FatalError(0)
+		c.FatalError(ErrWtf)
+		return
+	}
+
+	promise := c.getPushPromise(pushID)
+	if promise.isFulfilled() {
+		c.FatalError(ErrWtf)
 		return
 	}
 
 	resp := &ClientResponse{
 		Request:         nil,
-		IncomingMessage: newIncomingMessage(c.connection.decoder, nil),
+		IncomingMessage: newIncomingMessage(s, c.connection.decoder, nil),
 	}
 
-	err = resp.read(s, func(headers []hc.HeaderField) error {
+	err = resp.read(func(headers []hc.HeaderField) error {
 		err := resp.setHeaders(headers)
 		if err != nil {
 			return err
 		}
-		promise := c.getPushPromise(pushID)
-		promise.responseChannel <- resp
+		promise.fulfill(resp)
 		return nil
 	}, func(t FrameType, f byte, r io.Reader) error {
 		return ErrUnsupportedFrame
@@ -122,6 +127,7 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 		c.FatalError(0)
 		return
 	}
+	c.creditPushes(1)
 }
 
 func (c *ClientConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) {
@@ -141,23 +147,4 @@ func (c *ClientConnection) creditPushes(incr uint64) error {
 	w.WriteVarint(c.maxPushID)
 	_, err := c.controlStream.WriteFrame(frameMaxPushID, 0, buf.Bytes())
 	return err
-}
-
-// promiseTracker looks after push promises.
-type promiseTracker struct {
-	promises        []*PushPromise
-	responseChannel chan *ClientResponse
-	response        *ClientResponse
-}
-
-// Add adds a push promise to an existing tracker entry.
-func (pt *promiseTracker) Add(pp *PushPromise) {
-	pt.promises = append(pt.promises, pp)
-}
-
-// Fulfill fills out the response.
-func (pt *promiseTracker) Fulfill(resp *ClientResponse) {
-	pt.response = resp
-	pt.responseChannel <- resp
-	close(pt.responseChannel)
 }

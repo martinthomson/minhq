@@ -170,9 +170,15 @@ func (c *Connection) GetState() minq.State {
 }
 
 // Close the connection.
-func (c *Connection) Close( /* TODO application error code */ ) error {
+func (c *Connection) Close() error {
 	result := make(chan error)
 	c.ops.Add(&closeConnectionRequest{c, reportErrorChannel{result}})
+	return <-result
+}
+
+func (c *Connection) Error(e uint16, text string) error {
+	result := make(chan error)
+	c.ops.Add(&applicationCloseRequest{c, e, text, reportErrorChannel{result}})
 	return <-result
 }
 

@@ -79,7 +79,7 @@ func (s *RecvStream) Read(p []byte) (int, error) {
 }
 
 // StopSending currently does nothing because minq doesn't support it.
-func (s *RecvStream) StopSending(code minq.ErrorCode) error {
+func (s *RecvStream) StopSending(code uint16) error {
 	result := make(chan error)
 	s.c.ops.Add(&stopRequest{s.c, s, code, reportErrorChannel{result}})
 	return <-result

@@ -104,6 +104,7 @@ type incomingMessageFrameHandler func(FrameType, byte, io.Reader) error
 // IncomingMessage is the common parts of inbound messages (requests for
 // servers, responses for clients).
 type IncomingMessage struct {
+	s       *recvStream
 	decoder *hc.QpackDecoder
 	Headers headerFieldArray
 	concatenatingReader
@@ -111,9 +112,10 @@ type IncomingMessage struct {
 	trailers chan<- []hc.HeaderField
 }
 
-func newIncomingMessage(decoder *hc.QpackDecoder, headers []hc.HeaderField) IncomingMessage {
+func newIncomingMessage(s *recvStream, decoder *hc.QpackDecoder, headers []hc.HeaderField) IncomingMessage {
 	trailers := make(chan []hc.HeaderField)
 	return IncomingMessage{
+		s:       s,
 		decoder: decoder,
 		Headers: headers,
 		concatenatingReader: concatenatingReader{
@@ -126,7 +128,7 @@ func newIncomingMessage(decoder *hc.QpackDecoder, headers []hc.HeaderField) Inco
 	}
 }
 
-func (msg *IncomingMessage) read(s *recvStream, headersHandler initialHeadersHandler,
+func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 	frameHandler incomingMessageFrameHandler) error {
 	defer close(msg.trailers)
 	defer msg.concatenatingReader.Close()
@@ -134,7 +136,7 @@ func (msg *IncomingMessage) read(s *recvStream, headersHandler initialHeadersHan
 	beforeFirstHeaders := true
 	afterTrailers := false
 	for {
-		t, f, r, err := s.ReadFrame()
+		t, f, r, err := msg.s.ReadFrame()
 		if err == io.EOF {
 			return nil
 		}
@@ -156,7 +158,7 @@ func (msg *IncomingMessage) read(s *recvStream, headersHandler initialHeadersHan
 			if f != 0 {
 				return ErrInvalidFrame
 			}
-			headers, err := msg.decoder.ReadHeaderBlock(r, s.Id())
+			headers, err := msg.decoder.ReadHeaderBlock(r, msg.s.Id())
 			if err != nil {
 				return err
 			}

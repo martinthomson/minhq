@@ -100,6 +100,7 @@ func (req *readRequest) read() bool {
 	n, err := req.s.minq.Read(req.p)
 	success := err != minq.ErrorWouldBlock
 	if success {
+		//fmt.Printf("%v %d < %x\n", req.s.c.minq.Role(), req.s.Id(), req.p)
 		req.result <- &ioResult{n, err}
 	}
 	return success
@@ -121,12 +122,19 @@ type closeStreamRequest struct {
 type stopRequest struct {
 	c    *Connection
 	s    *RecvStream
-	code minq.ErrorCode
+	code uint16
 	reportErrorChannel
 }
 
 type closeConnectionRequest struct {
 	c *Connection
+	reportErrorChannel
+}
+
+type applicationCloseRequest struct {
+	c    *Connection
+	code uint16
+	text string
 	reportErrorChannel
 }
 
@@ -157,8 +165,10 @@ func (ops connectionOperations) Add(op connectionOperation) {
 func (ops connectionOperations) Handle(v connectionOperation) {
 	switch op := v.(type) {
 	case *closeConnectionRequest:
-		/* TODO Application Close for minq */
 		op.report(op.c.minq.Close())
+
+	case *applicationCloseRequest:
+		op.report(op.c.minq.Error(op.code, op.text))
 
 	case *createStreamRequest:
 		s := op.c.minq.CreateStream()
@@ -169,6 +179,7 @@ func (ops connectionOperations) Handle(v connectionOperation) {
 		op.result <- &SendStream{op.c, s}
 
 	case *writeRequest:
+		// fmt.Printf("%v %d > %x\n", op.s.c.minq.Role(), op.s.Id(), op.p)
 		n, err := op.s.minq.Write(op.p)
 		op.result <- &ioResult{n, err}
 

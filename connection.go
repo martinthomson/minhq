@@ -107,9 +107,10 @@ type connection struct {
 	ready chan struct{}
 }
 
-// init ensures that the connection is ready to go. It spawns a few goroutines
+// connect ensures that the connection is ready to go. It spawns a few goroutines
 // to handle the control streams.
-func (c *connection) init(handler connectionHandler) error {
+func (c *connection) connect(handler connectionHandler) error {
+	<-c.Connected
 	c.controlStream = newSendStream(c.CreateSendStream())
 	err := c.sendSettings()
 	if err != nil {
@@ -137,8 +138,8 @@ func (c *connection) init(handler connectionHandler) error {
 }
 
 // FatalError is a helper that passes on HTTP errors to the underlying connection.
-func (c *connection) FatalError(e HTTPError) {
-	c.Error(uint16(e), "")
+func (c *connection) FatalError(e HTTPError) error {
+	return c.Error(uint16(e), "")
 }
 
 func (c *connection) handlePriority(f byte, r io.Reader) error {

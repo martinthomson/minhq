@@ -109,7 +109,7 @@ func (req *readRequest) read() bool {
 type resetRequest struct {
 	c    *Connection
 	s    *SendStream
-	code minq.ErrorCode // TODO application error code
+	code uint16
 	reportErrorChannel
 }
 

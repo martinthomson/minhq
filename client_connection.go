@@ -26,7 +26,7 @@ type ClientConnection struct {
 
 // NewClientConnection wraps an instance of minq.Connection.
 func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
-	hq := &ClientConnection{
+	return &ClientConnection{
 		connection: connection{
 			config:     config,
 			Connection: *mwc,
@@ -34,17 +34,43 @@ func NewClientConnection(mwc *mw.Connection, config *Config) *ClientConnection {
 		},
 		promises: make(map[uint64]*PushPromise),
 	}
-	err := hq.init(hq)
+}
+
+// Connect waits until the connection is setup and ready.
+func (c *ClientConnection) Connect() error {
+	err := c.connect(c)
 	if err != nil {
-		return nil
+		return err
 	}
-	hq.creditPushes(config.MaxConcurrentPushes)
-	return hq
+	c.creditPushes(c.config.MaxConcurrentPushes)
+	return nil
+}
+
+func (c *ClientConnection) handleCancelPush(f byte, r FrameReader) error {
+	if f != 0 {
+		return ErrNonZeroFlags
+	}
+	pushID, err := r.ReadVarint()
+	if err != nil {
+		return err
+	}
+	err = r.CheckForEOF()
+	if err != nil {
+		return err
+	}
+	promise := c.getPushPromise(pushID)
+	promise.fulfill(nil, true)
+	return nil
 }
 
 // HandleFrame is for dealing with those frames that Connection can't.
 func (c *ClientConnection) HandleFrame(t FrameType, f byte, r FrameReader) error {
-	return ErrInvalidFrame
+	switch t {
+	case frameCancelPush:
+		return c.handleCancelPush(f, r)
+	default:
+		return ErrInvalidFrame
+	}
 }
 
 // Fetch makes a request.
@@ -118,7 +144,7 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 		if err != nil {
 			return err
 		}
-		promise.fulfill(resp)
+		promise.fulfill(resp, false)
 		return nil
 	}, func(t FrameType, f byte, r io.Reader) error {
 		return ErrUnsupportedFrame

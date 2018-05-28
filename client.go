@@ -53,6 +53,7 @@ func (c *Client) Connect(host string) (*ClientConnection, error) {
 	go serviceUdpSocket(connection.IncomingPackets, socket, connection)
 
 	c.Connections[host] = connection
+	<-connection.Connected
 	return connection, nil
 }
 

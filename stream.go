@@ -25,7 +25,7 @@ func (s *stream) Id() uint64 {
 
 // abort is the option of last resort.
 func (s *stream) abort() {
-	s.Reset(ErrQuicWtf)
+	s.Reset(uint16(ErrHttpInternalError))
 	s.StopSending(uint16(ErrHttpInternalError))
 }
 

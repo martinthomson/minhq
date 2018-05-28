@@ -10,6 +10,9 @@ import (
 	"github.com/martinthomson/minhq/hc"
 )
 
+// ErrPushCancelled is used when a push response is created, but the push was already cancelled.
+var ErrPushCancelled = errors.New("push was already cancelled")
+
 // ServerRequest handles incoming requests.
 type ServerRequest struct {
 	C      *ServerConnection
@@ -102,6 +105,7 @@ func (req *ServerRequest) Push(method string, target string, headers ...hc.Heade
 	}
 
 	push := &ServerPushRequest{
+		C:       req.C,
 		Target:  url,
 		Request: req,
 		PushID:  pushID,
@@ -155,8 +159,14 @@ func (resp *ServerResponse) ReferencePush(push *ServerPushRequest) error {
 	return resp.Request.ReferencePush(push)
 }
 
+// Cancel cancels the server response.
+func (resp *ServerResponse) Cancel() error {
+	return resp.s.Reset(uint16(ErrHttpRequestCancelled))
+}
+
 // ServerPushRequest is a more limited version of ServerRequest.
 type ServerPushRequest struct {
+	C       *ServerConnection
 	Target  *url.URL
 	Request *ServerRequest
 	PushID  uint64
@@ -165,6 +175,9 @@ type ServerPushRequest struct {
 
 // Respond on ServerPushRequest is functionally identical to the same function on ServerRequest.
 func (push *ServerPushRequest) Respond(statusCode int, headers ...hc.HeaderField) (*ServerResponse, error) {
+	if push.Request.C.pushCancelled(push.PushID) {
+		return nil, ErrPushCancelled
+	}
 	send := push.Request.C.CreateSendStream()
 	if send == nil {
 		return nil, errors.New("No avaliable send streams for push response")
@@ -179,4 +192,9 @@ func (push *ServerPushRequest) Respond(statusCode int, headers ...hc.HeaderField
 		return nil, err
 	}
 	return push.Request.sendResponse(statusCode, headers, s, push)
+}
+
+// Cancel abandons a push.
+func (push *ServerPushRequest) Cancel() error {
+	return push.C.cancelPush(push.PushID)
 }

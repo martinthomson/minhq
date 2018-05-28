@@ -1,6 +1,7 @@
 package test
 
 import (
+	"errors"
 	"net"
 	"sync"
 
@@ -22,6 +23,9 @@ type Transport struct {
 func (t *Transport) Send(p []byte) error {
 	defer t.writeSync.Unlock()
 	t.writeSync.Lock()
+	if t.write == nil {
+		return errors.New("closed")
+	}
 	t.write <- p
 	return nil
 }
@@ -39,6 +43,7 @@ func (t *Transport) Close() error {
 	defer t.writeSync.Unlock()
 	t.writeSync.Lock()
 	close(t.write)
+	t.write = nil
 	return nil
 }
 

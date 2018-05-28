@@ -1,6 +1,7 @@
 package minhq
 
 import (
+	"bytes"
 	"errors"
 	"io"
 	"net/url"
@@ -149,71 +150,86 @@ func (resp *ClientResponse) setHeaders(headers []hc.HeaderField) error {
 // promises with the same identifier in response to multiple requests.  See
 // Response() for the consequences of that.
 type PushPromise struct {
-	lock    sync.RWMutex
-	headers headerFieldArray
-	method  string
-	target  *url.URL
-	pushID  uint64
+	c *ClientConnection
 
+	headersLock sync.RWMutex
+	headers     headerFieldArray
+	method      string
+	target      *url.URL
+	pushID      uint64
+
+	responseLock    sync.RWMutex
 	responseChannel chan *ClientResponse
 	response        *ClientResponse
+	cancelled       bool
 }
 
 // Method returns the obvious thing.
 func (pp *PushPromise) Method() string {
-	defer pp.lock.RUnlock()
-	pp.lock.RLock()
+	defer pp.headersLock.RUnlock()
+	pp.headersLock.RLock()
 	return pp.method
 }
 
 // Target returns the obvious thing.
 func (pp *PushPromise) Target() *url.URL {
-	defer pp.lock.RUnlock()
-	pp.lock.RLock()
+	defer pp.headersLock.RUnlock()
+	pp.headersLock.RLock()
 	return pp.target
 }
 
 // Headers returns the headers from the promise.
 func (pp *PushPromise) Headers() []hc.HeaderField {
-	defer pp.lock.RUnlock()
-	pp.lock.RLock()
+	defer pp.headersLock.RUnlock()
+	pp.headersLock.RLock()
 	return pp.headers[:]
 }
 
 func (pp *PushPromise) setHeaders(h []hc.HeaderField) error {
-	defer pp.lock.Unlock()
-	pp.lock.Lock()
+	defer pp.headersLock.Unlock()
+	pp.headersLock.Lock()
 	pp.headers = h
 	var err error
 	pp.method, pp.target, err = pp.headers.getMethodAndTarget()
 	return err
 }
 
-func (pp *PushPromise) fulfill(resp *ClientResponse) {
-	defer pp.lock.Unlock()
-	pp.lock.Lock()
+func (pp *PushPromise) fulfill(resp *ClientResponse, cancelled bool) {
+	defer pp.responseLock.Unlock()
+	pp.responseLock.Lock()
 	pp.responseChannel <- resp
 	pp.response = resp
+	pp.cancelled = cancelled
 	close(pp.responseChannel)
 }
 
 func (pp *PushPromise) isFulfilled() bool {
-	defer pp.lock.RUnlock()
-	pp.lock.RLock()
-	return pp.response != nil
+	defer pp.responseLock.RUnlock()
+	pp.responseLock.RLock()
+	return pp.response != nil || pp.cancelled
 }
 
 // Reponse returns a response.  Note that because multiple push promises
 // can be made for the same response, only one call to this function will
 // receive a response.  Others receive a nil value.  This prevents
 // concurrent reads of the response body.
+// If the push is cancelled, this returns nil.
 func (pp *PushPromise) Response() *ClientResponse {
 	return <-pp.responseChannel
 }
 
+// Cancel cancels the push promise, either by sending CANCEL_PUSH, or by
+// stopping the stream if it has already started to arrive.
 func (pp *PushPromise) Cancel() error {
 	if pp.isFulfilled() {
-		pp.response.s.StopSending(uint16(ErrHttpRequestCancelled))
+		return pp.response.s.StopSending(uint16(ErrHttpRequestCancelled))
 	}
-	return ErrTooLarge
+
+	var buf bytes.Buffer
+	_, err := NewFrameWriter(&buf).WriteVarint(pp.pushID)
+	if err != nil {
+		return err
+	}
+	_, err = pp.c.controlStream.WriteFrame(frameCancelPush, 0, buf.Bytes())
+	return err
 }

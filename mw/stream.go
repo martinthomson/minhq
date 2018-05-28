@@ -39,7 +39,7 @@ func (s *SendStream) Write(p []byte) (int, error) {
 }
 
 // Reset kills a stream (outbound only).
-func (s *SendStream) Reset(err minq.ErrorCode) error {
+func (s *SendStream) Reset(err uint16) error {
 	result := make(chan error)
 	s.c.ops.Add(&resetRequest{s.c, s, err, reportErrorChannel{result}})
 	return <-result

@@ -28,7 +28,11 @@ type Server struct {
 
 func (s *Server) serviceConnections(requests chan<- *ServerRequest, connections chan<- *ServerConnection) {
 	for c := range s.Server.Connections {
-		connections <- newServerConnection(c, s.config, requests)
+		wrapped := newServerConnection(c, s.config)
+		go func() {
+			wrapped.Connect(requests)
+			connections <- wrapped
+		}()
 	}
 }
 

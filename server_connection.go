@@ -1,6 +1,7 @@
 package minhq
 
 import (
+	"bytes"
 	"errors"
 	"sync"
 
@@ -14,24 +15,31 @@ type ServerConnection struct {
 	pushIDLock sync.RWMutex
 	nextPushID uint64
 	maxPushID  uint64
+
+	cancelledPushesLock sync.RWMutex
+	cancelledPushes     map[uint64]bool
 }
 
 // newServerConnection wraps an instance of mw.Connection with server-related capabilities.
-func newServerConnection(mwc *mw.Connection, config *Config, requests chan<- *ServerRequest) *ServerConnection {
-	c := &ServerConnection{
+func newServerConnection(mwc *mw.Connection, config *Config) *ServerConnection {
+	return &ServerConnection{
 		connection: connection{
 			config:     config,
 			Connection: *mwc,
 			ready:      make(chan struct{}),
 		},
-		maxPushID: 0,
+		cancelledPushes: make(map[uint64]bool),
 	}
-	err := c.init(c)
+}
+
+// Connect waits until the connection is up and sends requests to the provided channel.
+func (c *ServerConnection) Connect(requests chan<- *ServerRequest) error {
+	err := c.connect(c)
 	if err != nil {
-		return nil
+		return err
 	}
 	go c.serviceRequests(requests)
-	return c
+	return nil
 }
 
 func (c *ServerConnection) serviceRequests(requests chan<- *ServerRequest) {
@@ -77,11 +85,54 @@ func (c *ServerConnection) getNextPushID() (uint64, error) {
 	return id, nil
 }
 
+func (c *ServerConnection) handleCancelPush(f byte, r FrameReader) error {
+	if f != 0 {
+		return ErrNonZeroFlags
+	}
+	pushID, err := r.ReadVarint()
+	if err != nil {
+		return err
+	}
+	err = r.CheckForEOF()
+	if err != nil {
+		return err
+	}
+	c.cancelledPushesLock.Lock()
+	defer c.cancelledPushesLock.Unlock()
+	c.cancelledPushes[pushID] = true
+	return nil
+}
+
+func (c *ServerConnection) cancelPush(pushID uint64) error {
+	var buf bytes.Buffer
+	_, err := NewFrameWriter(&buf).WriteVarint(pushID)
+	if err != nil {
+		return err
+	}
+	_, err = c.controlStream.WriteFrame(frameCancelPush, 0, buf.Bytes())
+	if err != nil {
+		return err
+	}
+
+	c.cancelledPushesLock.Lock()
+	defer c.cancelledPushesLock.Unlock()
+	c.cancelledPushes[pushID] = true
+	return nil
+}
+
+func (c *ServerConnection) pushCancelled(pushID uint64) bool {
+	c.cancelledPushesLock.RLock()
+	defer c.cancelledPushesLock.RUnlock()
+	return c.cancelledPushes[pushID]
+}
+
 // HandleFrame is for dealing with those frames that Connection can't.
 func (c *ServerConnection) HandleFrame(t FrameType, f byte, r FrameReader) error {
 	switch t {
 	case frameMaxPushID:
 		return c.handleMaxPushID(f, r)
+	case frameCancelPush:
+		return c.handleCancelPush(f, r)
 	default:
 		return ErrInvalidFrame
 	}

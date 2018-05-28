@@ -45,9 +45,13 @@ func (a *commandLine) exit(msg string) {
 }
 
 func (a *commandLine) parseServer(params []string) {
-	a.usage = "server <address:port> <cert> <key>"
+	a.fs.Usage = func() {
+		a.print("Usage: %s [...] server <address:port> <cert> <key>", a.fs.Name())
+	}
 	if len(params) < 3 {
 		a.exit("missing arguments")
+		a.print("Usage: %s [...] server <address:port> <cert> <key>")
+
 	}
 	a.args = &serverArguments{params[0], params[1], params[2]}
 }
@@ -61,7 +65,7 @@ func (a *commandLine) parseClient(params []string) {
 	var args clientArguments
 	fs := flag.NewFlagSet(a.fs.Name()+" client", flag.ExitOnError)
 	fs.Usage = func() {
-		a.print("Usage: %s [...] client [flags] <url> [url [...]]")
+		a.print("Usage: %s [...] client [flags] <url> [url [...]]", a.fs.Name())
 		fs.PrintDefaults()
 	}
 	fs.StringVar(&args.File, "d", "", "read request body from file")
@@ -107,7 +111,7 @@ func boundsCheck(v uint64, limit uint64, message string) {
 }
 
 func main() {
-	args := new(commandLine)
+	var args commandLine
 	args.Parse()
 
 	boundsCheck(args.commonFlags.TableSize, uint64(^uint(0)), "table size (-t)")
@@ -132,6 +136,22 @@ func die(msg string, err error) {
 	os.Exit(1)
 }
 
+func sendFile(dst io.WriteCloser, fname string) {
+	defer dst.Close()
+	if fname != "" {
+		return
+	}
+
+	inputFile, err := os.Open(fname)
+	if err != nil {
+		die("opening input file: "+fname, err)
+	}
+	_, err = io.Copy(dst, inputFile)
+	if err != nil {
+		die("sending request body", err)
+	}
+}
+
 func runClient(config *minhq.Config, args *clientArguments) {
 	client := minhq.Client{Config: *config}
 
@@ -140,21 +160,7 @@ func runClient(config *minhq.Config, args *clientArguments) {
 		if err != nil {
 			die("creating fetch", err)
 		}
-		if args.File != "" {
-			go func() {
-				defer request.Close()
-				inputFile, err := os.Open(args.File)
-				if err != nil {
-					die("opening input file: "+args.File, err)
-				}
-				_, err = io.Copy(request, inputFile)
-				if err != nil {
-					die("sending request body", err)
-				}
-			}()
-		} else {
-			request.Close()
-		}
+		go sendFile(request, args.File)
 
 		response := request.Response()
 		fmt.Println(response)

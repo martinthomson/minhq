@@ -43,6 +43,7 @@ func newClientServerPair(t *testing.T) *clientServer {
 		return &serverConnection.Connection
 	})
 	client := minhq.NewClientConnection(cs.ClientConnection, config)
+	assert.Nil(t, client.Connect())
 	return &clientServer{cs, server, client}
 }
 

@@ -494,15 +494,24 @@ func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
 	return encoder.writeHeaderBlock(headerWriter, &state)
 }
 
+// This is run only when the encoder mutex is taken.
+func (encoder *QpackEncoder) updateHighestAcknowledged(base int) {
+	if base > encoder.highestAcknowledged {
+		encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
+		encoder.highestAcknowledged = base
+	}
+}
+
 // Acknowledge is called when a header block has been acknowledged by the peer.
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
 func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	reducedBlocks := encoder.usage.ack(id, encoder.blockedStreams)
-	if reducedBlocks {
+	removedLargest, newLargest := encoder.usage.ack(id)
+	if removedLargest > encoder.highestAcknowledged && newLargest <= encoder.highestAcknowledged {
 		encoder.blockedStreams--
+		encoder.highestAcknowledged = removedLargest
 	}
 }
 

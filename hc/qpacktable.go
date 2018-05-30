@@ -166,11 +166,11 @@ func (su *qpackStreamUsage) next() *qpackHeaderBlockUsage {
 	return block
 }
 
-func (su *qpackStreamUsage) ack(largestAcknowledged int) bool {
+func (su *qpackStreamUsage) ack() int {
 	z := (*su)[0]
 	z.ack()
 	*su = (*su)[1:]
-	return z.max > largestAcknowledged && su.max() <= largestAcknowledged
+	return z.max
 }
 
 func (su *qpackStreamUsage) count() int {
@@ -198,19 +198,20 @@ func (ut *qpackUsageTracker) get(id uint64) *qpackStreamUsage {
 	return su
 }
 
-// ack removes one header block from the given id.  This returns true iff
-// the acknowledged header block had a maximum reference higher than
-// largestAcknowledged, and it does not after acknowledging the block.
-func (ut *qpackUsageTracker) ack(id uint64, largestAcknowledged int) bool {
+// ack removes one header block from the given id.  This returns the largest
+// reference from the acknowledged block and the new largest reference for
+// the given id so that the calling code can account for the number of blocked
+// streams correctly and efficiently.
+func (ut *qpackUsageTracker) ack(id uint64) (int, int) {
 	su := (*ut)[id]
 	if su == nil {
 		panic("shouldn't be acknowledging blocks that don't exist")
 	}
-	reduced := su.ack(largestAcknowledged)
+	oldLargest := su.ack()
 	if su.count() == 0 {
 		delete(*ut, id)
 	}
-	return reduced
+	return oldLargest, su.max()
 }
 
 func (ut *qpackUsageTracker) countBlockedStreams(largestAcknowledged int) (count int) {

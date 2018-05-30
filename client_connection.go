@@ -150,7 +150,6 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 		return ErrUnsupportedFrame
 	})
 	if err != nil {
-		c.FatalError(0)
 		return
 	}
 	c.creditPushes(1)

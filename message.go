@@ -133,54 +133,60 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 	defer close(msg.trailers)
 	defer msg.concatenatingReader.Close()
 
-	beforeFirstHeaders := true
-	afterTrailers := false
-	for {
-		t, f, r, err := msg.s.ReadFrame()
-		if err == io.EOF {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		if afterTrailers {
-			return ErrInvalidFrame
-		}
-
-		switch t {
-		case frameData:
-			if beforeFirstHeaders {
-				return ErrInvalidFrame
+	err := func() error {
+		beforeFirstHeaders := true
+		afterTrailers := false
+		for {
+			t, f, r, err := msg.s.ReadFrame()
+			if err == io.EOF {
+				return nil
 			}
-			msg.concatenatingReader.Add(r)
-
-		case frameHeaders:
-			if f != 0 {
-				return ErrInvalidFrame
-			}
-			headers, err := msg.decoder.ReadHeaderBlock(r, msg.s.Id())
 			if err != nil {
 				return err
 			}
+			if afterTrailers {
+				return ErrInvalidFrame
+			}
 
-			if beforeFirstHeaders {
-				err = headersHandler(headers)
+			switch t {
+			case frameData:
+				if beforeFirstHeaders {
+					return ErrInvalidFrame
+				}
+				msg.concatenatingReader.Add(r)
+
+			case frameHeaders:
+				if f != 0 {
+					return ErrInvalidFrame
+				}
+				headers, err := msg.decoder.ReadHeaderBlock(r, msg.s.Id())
 				if err != nil {
 					return err
 				}
-				beforeFirstHeaders = false
-			} else {
-				msg.trailers <- headers
-				afterTrailers = true
-			}
 
-		default:
-			err := frameHandler(t, f, r)
-			if err != nil {
-				return err
+				if beforeFirstHeaders {
+					err = headersHandler(headers)
+					if err != nil {
+						return err
+					}
+					beforeFirstHeaders = false
+				} else {
+					msg.trailers <- headers
+					afterTrailers = true
+				}
+
+			default:
+				err := frameHandler(t, f, r)
+				if err != nil {
+					return err
+				}
 			}
 		}
+	}()
+	if err != nil {
+		msg.decoder.Cancelled(msg.s.Id())
 	}
+	return err
 }
 
 // GetHeader performs a case-insensitive lookup for a given name.

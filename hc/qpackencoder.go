@@ -448,7 +448,7 @@ func (encoder *QpackEncoder) writeHeaderBlock(headerWriter io.Writer, state *qpa
 		return err
 	}
 
-	// This is the largest reference delta, which this code doesn't use.
+	// This is the base index delta, which this code doesn't use.
 	err = w.WriteInt(0, 8)
 	if err != nil {
 		return err

@@ -77,6 +77,11 @@ func TestFetch(t *testing.T) {
 	assert.Equal(t, 200, clientResponse.Status)
 }
 
+var (
+	pushMessage     = []byte("this is a push")
+	responseMessage = []byte("this is a response")
+)
+
 func TestPushOnRequest(t *testing.T) {
 	cs := newClientServerPair(t)
 	defer cs.Close()
@@ -94,7 +99,6 @@ func TestPushOnRequest(t *testing.T) {
 	assert.Nil(t, err)
 	serverPushResponse, err := serverPromise.Respond(200, hc.HeaderField{Name: "Push-ID", Value: "123"})
 	assert.Nil(t, err)
-	pushMessage := []byte{1, 2, 3}
 	_, err = serverPushResponse.Write(pushMessage)
 	assert.Nil(t, err)
 	assert.Nil(t, serverPushResponse.Close())
@@ -104,7 +108,6 @@ func TestPushOnRequest(t *testing.T) {
 
 	serverResponse, err := serverRequest.Respond(500)
 	assert.Nil(t, err)
-	responseMessage := []byte{6, 7, 8, 9}
 	_, err = serverResponse.Write(responseMessage)
 	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())
@@ -115,7 +118,7 @@ func TestPushOnRequest(t *testing.T) {
 	wg.Add(2)
 
 	go func() {
-		//defer t.Logf("promise reading done")
+		defer t.Logf("promise reading done")
 		defer wg.Done()
 		clientPushResponse := promise.Response()
 		assert.Equal(t, clientPushResponse.Status, 200)
@@ -126,7 +129,7 @@ func TestPushOnRequest(t *testing.T) {
 	}()
 
 	go func() {
-		//defer t.Logf("request reading done")
+		defer t.Logf("request reading done")
 		defer wg.Done()
 		response := clientRequest.Response()
 		assert.Equal(t, response.Status, 500)

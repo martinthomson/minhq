@@ -293,10 +293,13 @@ func (decoder *QpackDecoder) readLiteralWithNameLiteral(reader *Reader, base int
 // readBase reads the header block header and blocks until the decoder is
 // ready to process the remainder of the block.
 func (decoder *QpackDecoder) readBase(reader *Reader) (int, error) {
-	base, err := reader.ReadIndex(8)
+	largestReference, err := reader.ReadIndex(8)
 	if err != nil {
 		return 0, err
 	}
+	// This blocks until the dynamic table is ready.
+	decoder.table.WaitForEntry(largestReference)
+
 	sign, err := reader.ReadBit()
 	if err != nil {
 		return 0, err
@@ -305,9 +308,11 @@ func (decoder *QpackDecoder) readBase(reader *Reader) (int, error) {
 	if err != nil {
 		return 0, err
 	}
-	// Sign == 1 means negative.
-	largestReference := base + (delta * int(1-2*sign))
-	decoder.table.WaitForEntry(largestReference)
+	if sign == 1 && delta == 0 {
+		return 0, errors.New("invalid delta for base index")
+	}
+	// Sign: 1 means negative, 0 means positive.
+	base := largestReference + (delta * int(1-2*sign))
 	return base, nil
 }
 

@@ -158,17 +158,31 @@ func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) {
 	for {
 		b, err := r.ReadBit()
 		if err != nil {
-			return
-		}
-		v, err := r.ReadInt(7)
-		if err != nil {
+			// TODO kill the connection on errors here
 			return
 		}
 		switch b {
 		case 0:
+			v, err := r.ReadInt(7)
+			if err != nil {
+				return
+			}
 			encoder.AcknowledgeHeader(v)
 		case 1:
-			encoder.AcknowledgeInsert(int(v))
+			b, err = r.ReadBit()
+			if err != nil {
+				return
+			}
+			v, err := r.ReadInt(6)
+			if err != nil {
+				return
+			}
+			switch b {
+			case 0:
+				encoder.AcknowledgeInsert(int(v))
+			case 1:
+				encoder.AcknowledgeReset(v)
+			}
 		}
 	}
 }
@@ -502,6 +516,17 @@ func (encoder *QpackEncoder) updateHighestAcknowledged(base int) {
 	}
 }
 
+// AcknowledgeInsert acknowledges that the remote decoder has received a
+// insert or duplicate instructions up to the specified base.
+func (encoder *QpackEncoder) AcknowledgeInsert(base int) {
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
+	if base > encoder.highestAcknowledged {
+		encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
+		encoder.highestAcknowledged = base
+	}
+}
+
 // Acknowledge is called when a header block has been acknowledged by the peer.
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
@@ -515,14 +540,15 @@ func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) {
 	}
 }
 
-// AcknowledgeInsert acknowledges that the remote decoder has received a
-// insert or duplicate instructions up to the specified base.
-func (encoder *QpackEncoder) AcknowledgeInsert(base int) {
+// AcknowledgeReset is used when this side resets a stream.  When the decoder
+// discovers that it might not be able to acknowledge all the header blocks,
+// it sends a cancellation acknowledgment that we need to consume.
+func (encoder *QpackEncoder) AcknowledgeReset(id uint64) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	if base > encoder.highestAcknowledged {
-		encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
-		encoder.highestAcknowledged = base
+	largest := encoder.usage.cancel(id)
+	if largest > encoder.highestAcknowledged {
+		encoder.blockedStreams--
 	}
 }
 

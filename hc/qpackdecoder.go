@@ -18,6 +18,7 @@ type QpackDecoder struct {
 	table        *QpackDecoderTable
 	available    chan<- int
 	acknowledged chan<- uint64
+	cancelled    chan<- uint64
 }
 
 // NewQpackDecoder makes and sets up a QpackDecoder.
@@ -29,31 +30,44 @@ func NewQpackDecoder(aw io.Writer, capacity TableCapacity) *QpackDecoder {
 	decoder.available = available
 	acknowledged := make(chan uint64)
 	decoder.acknowledged = acknowledged
-	go decoder.writeAcknowledgements(aw, available, acknowledged)
+	cancelled := make(chan uint64)
+	decoder.cancelled = cancelled
+	go decoder.writeAcknowledgements(aw, available, acknowledged, cancelled)
 	return decoder
 }
 
-func (decoder *QpackDecoder) writeAcknowledgements(aw io.Writer, entries <-chan int, acknowledged <-chan uint64) {
+func (decoder *QpackDecoder) writeAcknowledgements(aw io.Writer, available <-chan int,
+	acknowledged <-chan uint64, cancelled <-chan uint64) {
 	w := NewWriter(aw)
 	for {
 		var v uint64
 		var err error
+		var remaining byte
 		select {
-		case entry := <-entries:
-			err = w.WriteBit(1)
-			v = uint64(entry)
 		case ack := <-acknowledged:
+			// Header block ack: instruction = b0
 			err = w.WriteBit(0)
+			remaining = 7
 			v = ack
+
+		case entry := <-available:
+			// Table update ack: instruction = b10
+			err = w.WriteBits(2, 2)
+			remaining = 6
+			v = uint64(entry)
+
+		case cancel := <-cancelled:
+			// Stream reset ack: instruction = b11
+			err = w.WriteBits(3, 2)
+			remaining = 6
+			v = cancel
 		}
 		if err != nil {
-			// TODO: close the connection instead of panicking
-			panic("unable to write acknowledgment")
+			// TODO: close the connection instead of just disappearing
 			return
 		}
-		err = w.WriteInt(v, 7)
+		err = w.WriteInt(v, remaining)
 		if err != nil {
-			panic("unable to write acknowledgment")
 			return
 		}
 	}
@@ -390,4 +404,11 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 	}
 	decoder.acknowledged <- id
 	return headers, nil
+}
+
+// Cancelled tells the decoder that the identifier was cancelled.  The decoder
+// informs the encoder about this.  This ensures that the encoder can know
+// to release any references that might not have been acknowledged.
+func (decoder *QpackDecoder) Cancelled(id uint64) {
+	decoder.cancelled <- id
 }

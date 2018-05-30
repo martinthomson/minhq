@@ -205,7 +205,7 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 
 func TestQpackBlockedEncode(t *testing.T) {
 	var updateBuf bytes.Buffer
-	encoder := hc.NewQpackEncoder(&updateBuf, 200, 50)
+	encoder := hc.NewQpackEncoder(&updateBuf, 250, 50)
 	setupEncoder(t, encoder, &updateBuf)
 
 	// Limit to just one blocking stream.
@@ -278,18 +278,21 @@ func TestQpackBlockedEncode(t *testing.T) {
 		{"name1", "value1"},
 	})
 
-	// While that stream is blocked, another stream won't insert or reference
-	// the entries that aren't acknowledged.
+	// While that stream is blocked, another stream won't insert new entries
+	// or reference entries that aren't acknowledged.  It will use entries
+	// inserted during setup because the acknowledgment of that stream
+	// also acknowledges the entries that it used.
 	headerBuf.Reset()
 	updateBuf.Reset()
 	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken+1,
+		hc.HeaderField{Name: "name2", Value: "value2"}, // this uses the index
 		hc.HeaderField{Name: "name3", Value: "value3"}, // this produces a literal
 	)
 	assert.Nil(t, err)
 	t.Logf("Other Stream: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	assert.Equal(t, []byte{}, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("00006ca874959f85ee3a2d2b3f")
+	expectedHeader, err = hex.DecodeString("0200806ca874959f85ee3a2d2b3f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -298,6 +301,34 @@ func TestQpackBlockedEncode(t *testing.T) {
 		{"name3", "value3"},
 		{"name2", "value2"},
 		{"name1", "value1"},
+	})
+
+	// Pretending to reset the stream enables the use of those entries.
+	encoder.AcknowledgeReset(defaultToken)
+
+	headerBuf.Reset()
+	updateBuf.Reset()
+	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken+1,
+		hc.HeaderField{Name: "name4", Value: "value4"}, // indexed
+		hc.HeaderField{Name: "name5", Value: "value5"}, // blocking
+		hc.HeaderField{Name: "name6", Value: "value6"}, // causes eviction
+	)
+	assert.Nil(t, err)
+	t.Logf("After Cancel: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	expectedUpdates, err = hex.DecodeString("1664a87495bf85ee3a2d2b7f64a87495cf85ee3a2d2b9f")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
+	expectedHeader, err = hex.DecodeString("0600828180")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name6", "value6"},
+		{"name5", "value5"},
+		{"name4", "value4"},
+		{"name3", "value3"},
+		{"name2", "value2"},
 	})
 }
 
@@ -361,10 +392,14 @@ func TestNotIndexedNameReference(t *testing.T) {
 }
 
 func checkAck(t *testing.T, ackReader *hc.Reader, eb byte, ev uint64) {
-	b, err := ackReader.ReadBit()
+	c := byte(1)
+	if eb > 1 {
+		c = 2
+	}
+	v, err := ackReader.ReadBits(c)
 	assert.Nil(t, err)
-	assert.Equal(t, b, eb)
-	v, err := ackReader.ReadInt(7)
+	assert.Equal(t, byte(v), eb)
+	v, err = ackReader.ReadInt(8 - c)
 	assert.Equal(t, v, ev)
 }
 
@@ -402,7 +437,8 @@ func TestQpackDecoderOrdered(t *testing.T) {
 
 		// There were new entries.  Check that they were acknowledged.
 		if decoder.Table.Base() > tableEntries {
-			checkAck(t, ackReader, 1, uint64(decoder.Table.Base()))
+			// 2 is the 2-bit instruction for a table update ack.
+			checkAck(t, ackReader, 2, uint64(decoder.Table.Base()))
 			tableEntries = decoder.Table.Base()
 		}
 
@@ -413,6 +449,7 @@ func TestQpackDecoderOrdered(t *testing.T) {
 		assert.Nil(t, err)
 
 		assert.Equal(t, tc.headers, headers)
+		// 0 is the 1-bit instruction for a header block ack.
 		checkAck(t, ackReader, 0, token)
 		token++
 	}

@@ -230,7 +230,7 @@ func (decoder *QpackDecoder) readPostBaseIndexed(reader *Reader, base int) (*Hea
 	if err != nil {
 		return nil, err
 	}
-	entry := decoder.Table.GetDynamic(-1*postBase, base)
+	entry := decoder.Table.GetDynamic(-1-postBase, base)
 	if entry == nil {
 		return nil, ErrIndexError
 	}

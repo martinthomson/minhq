@@ -372,7 +372,7 @@ func (encoder *QpackEncoder) writeIndexed(writer *Writer, state *qpackWriterStat
 		if index < 0 {
 			// This is a post-base index.
 			prefix = 4
-			index *= -1
+			index = -1 - index // -1 --> 0, -2 --> 1
 			err = writer.WriteBits(4, 4)
 		} else {
 			prefix = 6

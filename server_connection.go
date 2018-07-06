@@ -140,5 +140,5 @@ func (c *ServerConnection) HandleFrame(t FrameType, f byte, r FrameReader) error
 
 // HandleUnidirectionalStream causes a fatal error because servers don't expect to see these.
 func (c *ServerConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) {
-	s.StopSending(0)
+	s.StopSending(uint16(ErrHttpUnknownStreamType))
 }

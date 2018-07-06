@@ -155,12 +155,14 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 	c.creditPushes(1)
 }
 
+// HandleUnidirectionalStream manages receipt of a new unidirectional stream.
+// For clients, that's just push for now.
 func (c *ClientConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) {
 	switch t {
 	case unidirectionalStreamPush:
 		c.handlePushStream(s)
 	default:
-		s.StopSending(0)
+		s.StopSending(uint16(ErrHttpUnknownStreamType))
 	}
 }
 

@@ -14,14 +14,16 @@ import (
 // HTTPError is one of the QUIC/HTTP error codes defined.
 type HTTPError uint16
 
+// ErrHttp* are the standard defined error codes.
 const (
-	ErrHttpStopping            = HTTPError(0)
-	ErrHttpNoError             = HTTPError(1)
-	ErrHttpPushRefused         = HTTPError(2)
-	ErrHttpInternalError       = HTTPError(3)
-	ErrHttpPushAlreadyInCache  = HTTPError(4)
-	ErrHttpRequestCancelled    = HTTPError(5)
-	ErrHttpDecompressionFailed = HTTPError(6)
+	ErrHttpStopping            = HTTPError(0x0)
+	ErrHttpNoError             = HTTPError(0x1)
+	ErrHttpPushRefused         = HTTPError(0x2)
+	ErrHttpInternalError       = HTTPError(0x3)
+	ErrHttpPushAlreadyInCache  = HTTPError(0x4)
+	ErrHttpRequestCancelled    = HTTPError(0x5)
+	ErrHttpDecompressionFailed = HTTPError(0x6)
+	ErrHttpUnknownStreamType   = HTTPError(0xd)
 )
 
 func (e HTTPError) String() string {
@@ -40,6 +42,8 @@ func (e HTTPError) String() string {
 		return "REQUEST_CANCELLED"
 	case ErrHttpDecompressionFailed:
 		return "HTTP_HPACK_DECOMPRESSION_FAILED"
+	case ErrHttpUnknownStreamType:
+		return "HTTP_UNKNOWN_STREAM_TYPE"
 	default:
 		return "Too lazy to do this right now"
 	}

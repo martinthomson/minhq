@@ -152,7 +152,7 @@ func newConnectionOperations() *connectionOperations {
 	}
 }
 
-func (ops connectionOperations) Add(op connectionOperation) {
+func (ops *connectionOperations) Add(op connectionOperation) {
 	select {
 	case <-ops.closed:
 		op.report(ErrConnectionClosed)
@@ -162,7 +162,7 @@ func (ops connectionOperations) Add(op connectionOperation) {
 }
 
 // Select polls the set of operations and runs any necessary operations.
-func (ops connectionOperations) Handle(v connectionOperation) {
+func (ops *connectionOperations) Handle(v connectionOperation) {
 	switch op := v.(type) {
 	case *closeConnectionRequest:
 		op.report(op.c.minq.Close())
@@ -209,7 +209,7 @@ func (ops connectionOperations) Handle(v connectionOperation) {
 	}
 }
 
-func (ops connectionOperations) Close() error {
+func (ops *connectionOperations) Close() error {
 	ops.closeOnce.Do(func() {
 		close(ops.closed)
 		go ops.drain()
@@ -218,7 +218,7 @@ func (ops connectionOperations) Close() error {
 }
 
 // Drain the channel so that any outstanding operations won't hang.
-func (ops connectionOperations) drain() {
+func (ops *connectionOperations) drain() {
 	for op := range ops.ch {
 		op.report(ErrConnectionClosed)
 	}

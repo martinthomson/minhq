@@ -108,7 +108,8 @@ func (a headerFieldArray) getMethodAndTarget() (string, *url.URL, error) {
 	return method, withPath, nil
 }
 
-// initialHeadersHandler takes a header block and returns true if
+// initialHeadersHandler takes a header block and returns true if this is a
+// non-1xx block (which is always true for a request).
 type initialHeadersHandler func(headers headerFieldArray) (bool, error)
 type incomingMessageFrameHandler func(FrameType, io.Reader) error
 

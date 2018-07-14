@@ -86,6 +86,9 @@ func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 		return nil, err
 	}
 
+	if statusCode/100 == 1 {
+		return nil, nil
+	}
 	return response, nil
 }
 

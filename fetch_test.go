@@ -77,6 +77,39 @@ func TestFetch(t *testing.T) {
 	assert.Equal(t, 200, clientResponse.Status)
 }
 
+func Test1xx(t *testing.T) {
+	cs := newClientServerPair(t)
+	defer cs.Close()
+
+	url := "https://example.com/1xx"
+	clientRequest, err := cs.client.Fetch("GET", url)
+	assert.Nil(t, err)
+	assert.Nil(t, clientRequest.Close())
+
+	serverRequest := <-cs.server.Requests
+	assert.Equal(t, "GET", serverRequest.Method())
+	assert.Equal(t, url, serverRequest.Target().String())
+	_, err = io.Copy(ioutil.Discard, serverRequest)
+	assert.Nil(t, err)
+	assert.Nil(t, <-serverRequest.Trailers)
+
+	serverResponse, err := serverRequest.Respond(103,
+		hc.HeaderField{Name: "Link", Value: "</data>;rel=\"preload\""},
+	)
+	assert.Nil(t, serverResponse)
+
+	serverResponse, err = serverRequest.Respond(200,
+		hc.HeaderField{Name: "Content-Type", Value: "text/plain"},
+	)
+	assert.Nil(t, err)
+	_, err = io.Copy(serverResponse, strings.NewReader("Hello World"))
+	assert.Nil(t, err)
+	assert.Nil(t, serverResponse.Close())
+
+	clientResponse := clientRequest.Response()
+	assert.Equal(t, 200, clientResponse.Status)
+}
+
 var (
 	pushMessage     = []byte("this is a push")
 	responseMessage = []byte("this is a response")

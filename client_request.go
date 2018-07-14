@@ -101,13 +101,16 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		IncomingMessage: newIncomingMessage(&s.recvStream, c.connection.decoder, nil),
 	}
 	err := resp.read(func(headers headerFieldArray) (bool, error) {
-		is1xx := (headers.GetStatus() / 100) == 1
 		resp.setHeaders(headers)
-		if resp.Status == 0 {
+		switch headers.GetStatus() / 100 {
+		case 0:
 			return false, errors.New("invalid or missing status")
+		case 1:
+			return false, nil
+		default:
+			responseChannel <- resp
+			return true, nil
 		}
-		responseChannel <- resp
-		return !is1xx, nil
 	}, func(t FrameType, r io.Reader) error {
 		switch t {
 		case framePushPromise:

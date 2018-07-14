@@ -69,12 +69,18 @@ func TestFetch(t *testing.T) {
 	serverResponse, err := serverRequest.Respond(200,
 		hc.HeaderField{Name: "Content-Type", Value: "text/plain"})
 	assert.Nil(t, err)
-	_, err = io.Copy(serverResponse, strings.NewReader("Hello World"))
+	contentString := "Hello World"
+	_, err = io.Copy(serverResponse, strings.NewReader(contentString))
 	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())
 
 	clientResponse := clientRequest.Response()
 	assert.Equal(t, 200, clientResponse.Status)
+	var body bytes.Buffer
+	_, err = io.Copy(&body, clientResponse)
+	assert.Nil(t, err)
+	bodyString, err := body.ReadString(0)
+	assert.Equal(t, contentString, bodyString)
 }
 
 func Test1xx(t *testing.T) {
@@ -101,8 +107,6 @@ func Test1xx(t *testing.T) {
 	serverResponse, err = serverRequest.Respond(200,
 		hc.HeaderField{Name: "Content-Type", Value: "text/plain"},
 	)
-	assert.Nil(t, err)
-	_, err = io.Copy(serverResponse, strings.NewReader("Hello World"))
 	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())
 

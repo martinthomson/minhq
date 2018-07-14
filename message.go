@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/martinthomson/minhq/hc"
@@ -67,26 +68,35 @@ func (a headerFieldArray) GetHeader(n string) string {
 	return v
 }
 
-func (h headerFieldArray) getMethodAndTarget() (string, *url.URL, error) {
-	method := h.GetHeader(":method")
+// GetStatus returns the status from the header block, or 0 if it's not there or badly formed.
+func (a headerFieldArray) GetStatus() int {
+	status, err := strconv.Atoi(a.GetHeader(":status"))
+	if err != nil {
+		return 0
+	}
+	return status
+}
+
+func (a headerFieldArray) getMethodAndTarget() (string, *url.URL, error) {
+	method := a.GetHeader(":method")
 	if method == "" {
 		return "", nil, errors.New("Missing :method from request")
 	}
 
 	u := url.URL{
-		Scheme: h.GetHeader(":scheme"),
-		Host:   h.GetHeader(":authority"),
+		Scheme: a.GetHeader(":scheme"),
+		Host:   a.GetHeader(":authority"),
 	}
 	if u.Scheme == "" {
 		return "", nil, errors.New("Missing :scheme from request")
 	}
 	if u.Host == "" {
-		u.Host = h.GetHeader("Host")
+		u.Host = a.GetHeader("Host")
 	}
 	if u.Host == "" {
 		return "", nil, errors.New("Missing :authority/Host from request")
 	}
-	p := h.GetHeader(":path")
+	p := a.GetHeader(":path")
 	if p == "" {
 		return "", nil, errors.New("Missing :path from request")
 	}
@@ -98,7 +108,8 @@ func (h headerFieldArray) getMethodAndTarget() (string, *url.URL, error) {
 	return method, withPath, nil
 }
 
-type initialHeadersHandler func(headers []hc.HeaderField) error
+// initialHeadersHandler takes a header block and returns true if
+type initialHeadersHandler func(headers headerFieldArray) (bool, error)
 type incomingMessageFrameHandler func(FrameType, byte, io.Reader) error
 
 // IncomingMessage is the common parts of inbound messages (requests for
@@ -134,7 +145,7 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 	defer msg.concatenatingReader.Close()
 
 	err := func() error {
-		beforeFirstHeaders := true
+		gotFirstHeaders := false
 		afterTrailers := false
 		for {
 			t, f, r, err := msg.s.ReadFrame()
@@ -150,7 +161,7 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 
 			switch t {
 			case frameData:
-				if beforeFirstHeaders {
+				if !gotFirstHeaders {
 					return ErrInvalidFrame
 				}
 				msg.concatenatingReader.Add(r)
@@ -164,15 +175,14 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 					return err
 				}
 
-				if beforeFirstHeaders {
-					err = headersHandler(headers)
+				if gotFirstHeaders {
+					msg.trailers <- headers
+					afterTrailers = true
+				} else {
+					gotFirstHeaders, err = headersHandler(headers)
 					if err != nil {
 						return err
 					}
-					beforeFirstHeaders = false
-				} else {
-					msg.trailers <- headers
-					afterTrailers = true
 				}
 
 			default:
@@ -265,6 +275,7 @@ func newOutgoingMessage(c *connection, s *sendStream, headers []hc.HeaderField) 
 	}
 }
 
+// Headers returns the header fields on this message.
 func (msg *OutgoingMessage) Headers() []hc.HeaderField {
 	return msg.headers[:]
 }

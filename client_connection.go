@@ -139,13 +139,14 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 		IncomingMessage: newIncomingMessage(s, c.connection.decoder, nil),
 	}
 
-	err = resp.read(func(headers []hc.HeaderField) error {
-		err := resp.setHeaders(headers)
-		if err != nil {
-			return err
+	err = resp.read(func(headers headerFieldArray) (bool, error) {
+		is1xx := (headers.GetStatus() / 100) == 1
+		resp.setHeaders(headers)
+		if resp.Status == 0 {
+			return false, err
 		}
 		promise.fulfill(resp, false)
-		return nil
+		return !is1xx, nil
 	}, func(t FrameType, f byte, r io.Reader) error {
 		return ErrUnsupportedFrame
 	})

@@ -9,6 +9,7 @@ import (
 	"github.com/martinthomson/minhq/hc"
 )
 
+// ErrSettingValue complains about the value of a setting.
 var ErrSettingValue = errors.New("setting value out of range")
 
 type settingType uint16

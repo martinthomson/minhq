@@ -34,19 +34,21 @@ func newServerRequest(c *ServerConnection, s *stream) *ServerRequest {
 	}
 }
 
+// Method returns the request method.
 func (req *ServerRequest) Method() string {
 	return req.method
 }
 
+// Target returns the request target.
 func (req *ServerRequest) Target() *url.URL {
 	return req.target
 }
 
 func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
-	err := req.read(func(headers []hc.HeaderField) error {
+	err := req.read(func(headers headerFieldArray) (bool, error) {
 		req.setHeaders(headers)
 		requests <- req
-		return nil
+		return true, nil
 	}, func(t FrameType, f byte, r io.Reader) error {
 		return ErrUnsupportedFrame
 	})

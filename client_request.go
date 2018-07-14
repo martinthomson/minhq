@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/url"
-	"strconv"
 	"sync"
 
 	"github.com/martinthomson/minhq/hc"
@@ -104,13 +103,14 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		Request:         req,
 		IncomingMessage: newIncomingMessage(&s.recvStream, c.connection.decoder, nil),
 	}
-	err := resp.read(func(headers []hc.HeaderField) error {
-		err := resp.setHeaders(headers)
-		if err != nil {
-			return err
+	err := resp.read(func(headers headerFieldArray) (bool, error) {
+		is1xx := (headers.GetStatus() / 100) == 1
+		resp.setHeaders(headers)
+		if resp.Status == 0 {
+			return false, errors.New("invalid or missing status")
 		}
 		responseChannel <- resp
-		return nil
+		return !is1xx, nil
 	}, func(t FrameType, f byte, r io.Reader) error {
 		switch t {
 		case framePushPromise:
@@ -138,11 +138,9 @@ type ClientResponse struct {
 }
 
 // setHeaders sets the header fields, and updates the Status field value.
-func (resp *ClientResponse) setHeaders(headers []hc.HeaderField) error {
+func (resp *ClientResponse) setHeaders(headers headerFieldArray) {
 	resp.Headers = headers
-	var err error
-	resp.Status, err = strconv.Atoi(resp.GetHeader(":status"))
-	return err
+	resp.Status = headers.GetStatus()
 }
 
 // PushPromise is what you get when you receive a push promise.
@@ -209,7 +207,7 @@ func (pp *PushPromise) isFulfilled() bool {
 	return pp.response != nil || pp.cancelled
 }
 
-// Reponse returns a response.  Note that because multiple push promises
+// Response returns a response.  Note that because multiple push promises
 // can be made for the same response, only one call to this function will
 // receive a response.  Others receive a nil value.  This prevents
 // concurrent reads of the response body.

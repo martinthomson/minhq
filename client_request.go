@@ -68,10 +68,7 @@ func (req *ClientRequest) Response() *ClientResponse {
 	return <-req.response
 }
 
-func (req *ClientRequest) handlePushPromise(s *stream, c *ClientConnection, f byte, r io.Reader) error {
-	if f != 0 {
-		return ErrNonZeroFlags
-	}
+func (req *ClientRequest) handlePushPromise(s *stream, c *ClientConnection, r io.Reader) error {
 	fr := NewFrameReader(r)
 	pushID, err := fr.ReadVarint()
 	if err != nil {
@@ -111,10 +108,10 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		}
 		responseChannel <- resp
 		return !is1xx, nil
-	}, func(t FrameType, f byte, r io.Reader) error {
+	}, func(t FrameType, r io.Reader) error {
 		switch t {
 		case framePushPromise:
-			err := req.handlePushPromise(s, c, f, r)
+			err := req.handlePushPromise(s, c, r)
 			if err != nil {
 				return err
 			}
@@ -228,6 +225,6 @@ func (pp *PushPromise) Cancel() error {
 	if err != nil {
 		return err
 	}
-	_, err = pp.c.controlStream.WriteFrame(frameCancelPush, 0, buf.Bytes())
+	_, err = pp.c.controlStream.WriteFrame(frameCancelPush, buf.Bytes())
 	return err
 }

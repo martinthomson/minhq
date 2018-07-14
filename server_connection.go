@@ -50,10 +50,7 @@ func (c *ServerConnection) serviceRequests(requests chan<- *ServerRequest) {
 	}
 }
 
-func (c *ServerConnection) handleMaxPushID(f byte, r FrameReader) error {
-	if f != 0 {
-		return ErrNonZeroFlags
-	}
+func (c *ServerConnection) handleMaxPushID(r FrameReader) error {
 	n, err := r.ReadVarint()
 	if err != nil {
 		c.FatalError(ErrWtf)
@@ -85,10 +82,7 @@ func (c *ServerConnection) getNextPushID() (uint64, error) {
 	return id, nil
 }
 
-func (c *ServerConnection) handleCancelPush(f byte, r FrameReader) error {
-	if f != 0 {
-		return ErrNonZeroFlags
-	}
+func (c *ServerConnection) handleCancelPush(r FrameReader) error {
 	pushID, err := r.ReadVarint()
 	if err != nil {
 		return err
@@ -109,7 +103,7 @@ func (c *ServerConnection) cancelPush(pushID uint64) error {
 	if err != nil {
 		return err
 	}
-	_, err = c.controlStream.WriteFrame(frameCancelPush, 0, buf.Bytes())
+	_, err = c.controlStream.WriteFrame(frameCancelPush, buf.Bytes())
 	if err != nil {
 		return err
 	}
@@ -127,12 +121,12 @@ func (c *ServerConnection) pushCancelled(pushID uint64) bool {
 }
 
 // HandleFrame is for dealing with those frames that Connection can't.
-func (c *ServerConnection) HandleFrame(t FrameType, f byte, r FrameReader) error {
+func (c *ServerConnection) HandleFrame(t FrameType, r FrameReader) error {
 	switch t {
 	case frameMaxPushID:
-		return c.handleMaxPushID(f, r)
+		return c.handleMaxPushID(r)
 	case frameCancelPush:
-		return c.handleCancelPush(f, r)
+		return c.handleCancelPush(r)
 	default:
 		return ErrInvalidFrame
 	}

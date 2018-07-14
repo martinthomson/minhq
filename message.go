@@ -110,7 +110,7 @@ func (a headerFieldArray) getMethodAndTarget() (string, *url.URL, error) {
 
 // initialHeadersHandler takes a header block and returns true if
 type initialHeadersHandler func(headers headerFieldArray) (bool, error)
-type incomingMessageFrameHandler func(FrameType, byte, io.Reader) error
+type incomingMessageFrameHandler func(FrameType, io.Reader) error
 
 // IncomingMessage is the common parts of inbound messages (requests for
 // servers, responses for clients).
@@ -148,7 +148,7 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 		gotFirstHeaders := false
 		afterTrailers := false
 		for {
-			t, f, r, err := msg.s.ReadFrame()
+			t, r, err := msg.s.ReadFrame()
 			if err == io.EOF {
 				return nil
 			}
@@ -167,9 +167,6 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 				msg.concatenatingReader.Add(r)
 
 			case frameHeaders:
-				if f != 0 {
-					return ErrInvalidFrame
-				}
 				headers, err := msg.decoder.ReadHeaderBlock(r, msg.s.Id())
 				if err != nil {
 					return err
@@ -186,7 +183,7 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 				}
 
 			default:
-				err := frameHandler(t, f, r)
+				err := frameHandler(t, r)
 				if err != nil {
 					return err
 				}
@@ -285,7 +282,7 @@ func (msg *OutgoingMessage) Write(p []byte) (int, error) {
 	// Note that WriteFrame always uses the entire input array, and it reports
 	// how much it wrote, not how much it used.  It always uses the entire
 	// input array.  That's not the io.Writer contract, so adapt.
-	_, err := msg.s.WriteFrame(frameData, 0, p)
+	_, err := msg.s.WriteFrame(frameData, p)
 	if err != nil {
 		return 0, err
 	}
@@ -299,7 +296,7 @@ func (msg *OutgoingMessage) writeHeaderBlock(headers []hc.HeaderField) error {
 	if err != nil {
 		return err
 	}
-	_, err = msg.s.WriteFrame(frameHeaders, 0, headerBuf.Bytes())
+	_, err = msg.s.WriteFrame(frameHeaders, headerBuf.Bytes())
 	return err
 }
 

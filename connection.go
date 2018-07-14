@@ -91,7 +91,7 @@ type Config struct {
 
 // connectionHandler is used by subclasses of connection to deal with frames that only they handle.
 type connectionHandler interface {
-	HandleFrame(FrameType, byte, FrameReader) error
+	HandleFrame(FrameType, FrameReader) error
 	HandleUnidirectionalStream(unidirectionalStreamType, *recvStream)
 }
 
@@ -146,7 +146,7 @@ func (c *connection) FatalError(e HTTPError) error {
 	return c.Error(uint16(e), "")
 }
 
-func (c *connection) handlePriority(f byte, r io.Reader) error {
+func (c *connection) handlePriority(r io.Reader) error {
 	// TODO implement something useful
 	_, err := io.Copy(ioutil.Discard, r)
 	if err != nil {
@@ -170,7 +170,7 @@ func (c *connection) sendSettings() error {
 	if n != int64(buf.Len()) {
 		return ErrStreamBlocked
 	}
-	_, err = c.controlStream.WriteFrame(frameSettings, 0, buf.Bytes())
+	_, err = c.controlStream.WriteFrame(frameSettings, buf.Bytes())
 	return err
 }
 
@@ -178,13 +178,13 @@ func (c *connection) sendSettings() error {
 // stream until it encounters an error.
 func (c *connection) serviceControlStream(controlStream *recvStream,
 	handler connectionHandler, ready chan<- struct{}) {
-	t, f, r, err := controlStream.ReadFrame()
+	t, r, err := controlStream.ReadFrame()
 	if err != nil {
 		c.FatalError(ErrWtf)
 		return
 	}
 
-	if t != frameSettings || f != 0 {
+	if t != frameSettings {
 		c.FatalError(ErrWtf)
 		return
 	}
@@ -198,16 +198,16 @@ func (c *connection) serviceControlStream(controlStream *recvStream,
 	close(ready)
 
 	for {
-		t, f, r, err = controlStream.ReadFrame()
+		t, r, err = controlStream.ReadFrame()
 		if err != nil {
 			c.FatalError(ErrWtf)
 			return
 		}
 		switch t {
 		case framePriority:
-			err = c.handlePriority(f, r)
+			err = c.handlePriority(r)
 		default:
-			err = handler.HandleFrame(t, f, r)
+			err = handler.HandleFrame(t, r)
 		}
 		if err != nil {
 			c.FatalError(ErrWtf)

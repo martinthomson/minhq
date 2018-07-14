@@ -49,7 +49,7 @@ func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
 		req.setHeaders(headers)
 		requests <- req
 		return true, nil
-	}, func(t FrameType, f byte, r io.Reader) error {
+	}, func(t FrameType, r io.Reader) error {
 		return ErrUnsupportedFrame
 	})
 	if err != nil {
@@ -138,7 +138,7 @@ func (req *ServerRequest) writePushPromise(push *ServerPushRequest) error {
 	if err != nil {
 		return err
 	}
-	_, err = req.s.WriteFrame(framePushPromise, 0, headerBuf.Bytes())
+	_, err = req.s.WriteFrame(framePushPromise, headerBuf.Bytes())
 	return err
 }
 

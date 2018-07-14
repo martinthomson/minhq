@@ -55,7 +55,7 @@ var ErrTooLarge = errors.New("Value too large for the field")
 type FrameReader interface {
 	bitio.BitReader
 	ReadVarint() (uint64, error)
-	ReadFrame() (FrameType, byte, FrameReader, error)
+	ReadFrame() (FrameType, FrameReader, error)
 	Limited(n uint64) FrameReader
 	CheckForEOF() error
 }
@@ -79,20 +79,16 @@ func (fr *frameReader) ReadVarint() (uint64, error) {
 }
 
 // ReadFrame reads a frame header and returns the different pieces of the frame.
-func (fr *frameReader) ReadFrame() (FrameType, byte, FrameReader, error) {
+func (fr *frameReader) ReadFrame() (FrameType, FrameReader, error) {
 	len, err := fr.ReadVarint()
 	if err != nil {
-		return 0, 0, nil, err
+		return 0, nil, err
 	}
 	t, err := fr.ReadByte()
 	if err != nil {
-		return 0, 0, nil, err
+		return 0, nil, err
 	}
-	f, err := fr.ReadByte()
-	if err != nil {
-		return 0, 0, nil, err
-	}
-	return FrameType(t), f, fr.Limited(len), nil
+	return FrameType(t), fr.Limited(len), nil
 }
 
 // Limited makes an io.LimitedReader that reads the next `n` bytes from this reader.
@@ -117,7 +113,7 @@ func (fr *frameReader) CheckForEOF() error {
 type FrameWriter interface {
 	bitio.BitWriter
 	WriteVarint(v uint64) (int, error)
-	WriteFrame(t FrameType, f byte, p []byte) (int, error)
+	WriteFrame(t FrameType, p []byte) (int, error)
 }
 
 type frameWriter struct {
@@ -155,16 +151,12 @@ func (fw *frameWriter) WriteVarint(v uint64) (int, error) {
 	return int(n), nil
 }
 
-func (fw *frameWriter) WriteFrame(t FrameType, f byte, p []byte) (int, error) {
+func (fw *frameWriter) WriteFrame(t FrameType, p []byte) (int, error) {
 	written, err := fw.WriteVarint(uint64(len(p)))
 	if err != nil {
 		return written, err
 	}
 	err = fw.WriteByte(byte(t))
-	if err != nil {
-		return written, err
-	}
-	err = fw.WriteByte(byte(f))
 	if err != nil {
 		return written, err
 	}

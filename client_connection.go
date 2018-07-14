@@ -46,10 +46,7 @@ func (c *ClientConnection) Connect() error {
 	return nil
 }
 
-func (c *ClientConnection) handleCancelPush(f byte, r FrameReader) error {
-	if f != 0 {
-		return ErrNonZeroFlags
-	}
+func (c *ClientConnection) handleCancelPush(r FrameReader) error {
 	pushID, err := r.ReadVarint()
 	if err != nil {
 		return err
@@ -64,10 +61,10 @@ func (c *ClientConnection) handleCancelPush(f byte, r FrameReader) error {
 }
 
 // HandleFrame is for dealing with those frames that Connection can't.
-func (c *ClientConnection) HandleFrame(t FrameType, f byte, r FrameReader) error {
+func (c *ClientConnection) HandleFrame(t FrameType, r FrameReader) error {
 	switch t {
 	case frameCancelPush:
-		return c.handleCancelPush(f, r)
+		return c.handleCancelPush(r)
 	default:
 		return ErrInvalidFrame
 	}
@@ -147,7 +144,7 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 		}
 		promise.fulfill(resp, false)
 		return !is1xx, nil
-	}, func(t FrameType, f byte, r io.Reader) error {
+	}, func(t FrameType, r io.Reader) error {
 		return ErrUnsupportedFrame
 	})
 	if err != nil {
@@ -173,6 +170,6 @@ func (c *ClientConnection) creditPushes(incr uint64) error {
 	var buf bytes.Buffer
 	w := NewFrameWriter(&buf)
 	w.WriteVarint(c.maxPushID)
-	_, err := c.controlStream.WriteFrame(frameMaxPushID, 0, buf.Bytes())
+	_, err := c.controlStream.WriteFrame(frameMaxPushID, buf.Bytes())
 	return err
 }

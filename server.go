@@ -31,7 +31,9 @@ func (s *Server) serviceConnections(requests chan<- *ServerRequest, connections 
 		wrapped := newServerConnection(c, s.config)
 		go func() {
 			wrapped.Connect(requests)
-			connections <- wrapped
+			if connections != nil {
+				connections <- wrapped
+			}
 		}()
 	}
 }
@@ -40,7 +42,10 @@ func (s *Server) serviceConnections(requests chan<- *ServerRequest, connections 
 // Run Listen() for a basic server.
 func RunServer(ms *minq.Server, config *Config) *Server {
 	requests := make(chan *ServerRequest)
-	connections := make(chan *ServerConnection)
+	var connections chan *ServerConnection
+	if config.TrackConnections {
+		connections = make(chan *ServerConnection)
+	}
 	s := &Server{
 		Server:      *mw.RunServer(ms),
 		config:      config,

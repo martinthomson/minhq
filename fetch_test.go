@@ -32,6 +32,7 @@ func newClientServerPair(t *testing.T) *clientServer {
 		DecoderTableCapacity: 4096,
 		ConcurrentDecoders:   10,
 		MaxConcurrentPushes:  10,
+		TrackConnections:     true,
 	}
 	var server *minhq.Server
 	cs := test.NewClientServerPair(func(ms *minq.Server) *mw.Server {

@@ -87,6 +87,9 @@ type Config struct {
 	DecoderTableCapacity hc.TableCapacity
 	ConcurrentDecoders   uint16
 	MaxConcurrentPushes  uint64
+	// TrackConnections determines whether a server creates a channel for new connections.
+	// If true, new connections will be written to the Server.Connections channel.
+	TrackConnections bool
 }
 
 // connectionHandler is used by subclasses of connection to deal with frames that only they handle.

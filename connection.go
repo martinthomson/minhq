@@ -90,6 +90,10 @@ type Config struct {
 	// TrackConnections determines whether a server creates a channel for new connections.
 	// If true, new connections will be written to the Server.Connections channel.
 	TrackConnections bool
+	// InformationalResponses causes channels to be created on client requests and push
+	// promises that emit informational responses.  Setting this to false causes
+	// informational responses to be discarded.
+	InformationalResponses bool
 }
 
 // connectionHandler is used by subclasses of connection to deal with frames that only they handle.

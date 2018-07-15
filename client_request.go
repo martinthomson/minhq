@@ -31,6 +31,18 @@ type Request interface {
 	Response() *ClientResponse
 }
 
+// InformationalResponse encapsulates a 1xx response.
+type InformationalResponse struct {
+	StatusCode int
+	Headers    headerFieldArray
+}
+
+// GetHeader returns a header field, combining multiple instances of the same
+// header field into the one value, and returning nil if there isn't one.
+func (ir *InformationalResponse) GetHeader(n string) string {
+	return ir.Headers.GetHeader(n)
+}
+
 // ClientRequest is a representation of a request. A Connection will return one
 // of these in response to a request to send a request. It is writable so that
 // requests with bodies can be sent. A channel indicates where responses can be
@@ -51,6 +63,11 @@ type ClientRequest struct {
 	// `for pp := range req.Pushes { pp.Cancel() }`
 	Pushes <-chan *PushPromise
 	pushes chan<- *PushPromise
+
+	// InformationalResponses is originally nil.  Assign to this if you intend to
+	// consume informational (1xx) responses.
+	InformationalResponses <-chan *InformationalResponse
+	informationalResponses chan<- *InformationalResponse
 }
 
 // Method returns the obvious thing.
@@ -106,6 +123,9 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		case 0:
 			return false, errors.New("invalid or missing status")
 		case 1:
+			if req.informationalResponses != nil {
+				req.informationalResponses <- &InformationalResponse{headers.GetStatus(), headers}
+			}
 			return false, nil
 		default:
 			responseChannel <- resp
@@ -160,6 +180,9 @@ type PushPromise struct {
 	responseChannel chan *ClientResponse
 	response        *ClientResponse
 	cancelled       bool
+
+	InformationalResponses <-chan *InformationalResponse
+	informationalResponses chan<- *InformationalResponse
 }
 
 // Method returns the obvious thing.

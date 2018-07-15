@@ -29,10 +29,11 @@ func (cs *clientServer) Close() error {
 
 func newClientServerPair(t *testing.T) *clientServer {
 	config := &minhq.Config{
-		DecoderTableCapacity: 4096,
-		ConcurrentDecoders:   10,
-		MaxConcurrentPushes:  10,
-		TrackConnections:     true,
+		DecoderTableCapacity:   4096,
+		ConcurrentDecoders:     10,
+		MaxConcurrentPushes:    10,
+		TrackConnections:       true,
+		InformationalResponses: true,
 	}
 	var server *minhq.Server
 	cs := test.NewClientServerPair(func(ms *minq.Server) *mw.Server {
@@ -100,8 +101,9 @@ func Test1xx(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Nil(t, <-serverRequest.Trailers)
 
+	linkValue := "</data>;rel=\"preload\""
 	serverResponse, err := serverRequest.Respond(103,
-		hc.HeaderField{Name: "Link", Value: "</data>;rel=\"preload\""},
+		hc.HeaderField{Name: "Link", Value: linkValue},
 	)
 	assert.Nil(t, serverResponse)
 
@@ -110,6 +112,10 @@ func Test1xx(t *testing.T) {
 	)
 	assert.Nil(t, err)
 	assert.Nil(t, serverResponse.Close())
+
+	info := <-clientRequest.InformationalResponses
+	assert.Equal(t, 103, info.StatusCode)
+	assert.Equal(t, linkValue, info.GetHeader("link"))
 
 	clientResponse := clientRequest.Response()
 	assert.Equal(t, 200, clientResponse.Status)

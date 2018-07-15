@@ -89,13 +89,19 @@ func (c *ClientConnection) Fetch(method string, target string, headers ...hc.Hea
 
 	responseChannel := make(chan *ClientResponse)
 	pushes := make(chan *PushPromise)
+	var informational chan *InformationalResponse
+	if c.config.InformationalResponses {
+		informational = make(chan *InformationalResponse)
+	}
 	req := &ClientRequest{
-		method:          method,
-		target:          url,
-		response:        responseChannel,
-		OutgoingMessage: newOutgoingMessage(&c.connection, &s.sendStream, allHeaders),
-		Pushes:          pushes,
-		pushes:          pushes,
+		method:                 method,
+		target:                 url,
+		response:               responseChannel,
+		OutgoingMessage:        newOutgoingMessage(&c.connection, &s.sendStream, allHeaders),
+		Pushes:                 pushes,
+		pushes:                 pushes,
+		InformationalResponses: informational,
+		informationalResponses: informational,
 	}
 
 	err = req.writeHeaderBlock(allHeaders)
@@ -142,6 +148,9 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 		case 0:
 			return false, errors.New("invalid or missing status")
 		case 1:
+			if promise.informationalResponses != nil {
+				promise.informationalResponses <- &InformationalResponse{headers.GetStatus(), headers}
+			}
 			return false, nil
 		default:
 			promise.fulfill(resp, false)

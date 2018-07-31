@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/martinthomson/minhq/hc"
 	"github.com/stvp/assert"
@@ -133,7 +134,8 @@ func assertQpackTableFull(t *testing.T, encoder *hc.QpackEncoder, updateBuf *byt
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
-	encoder.AcknowledgeHeader(fullToken)
+	// No need to acknowledge this header block, because it didn't reference
+	// the header table.
 }
 
 const defaultToken = uint64(12345)
@@ -403,6 +405,12 @@ func checkAck(t *testing.T, ackReader *hc.Reader, eb byte, ev uint64) {
 	assert.Equal(t, v, ev)
 }
 
+// needsAcknowledgment returns true of the largest reference is greater than 0.
+// We only need to check first octet of the encoded header block to learn this.
+func needsAcknowledgment(encoded []byte) bool {
+	return encoded[0] > 0
+}
+
 func TestQpackDecoderOrdered(t *testing.T) {
 	var ackReader *hc.Reader
 	var decoder *hc.QpackDecoder
@@ -437,8 +445,8 @@ func TestQpackDecoderOrdered(t *testing.T) {
 
 		// There were new entries.  Check that they were acknowledged.
 		if decoder.Table.Base() > tableEntries {
-			// 2 is the 2-bit instruction for a table update ack.
-			checkAck(t, ackReader, 2, uint64(decoder.Table.Base()))
+			// 0 is the 2-bit instruction for a table state synchronize.
+			checkAck(t, ackReader, 0, uint64(decoder.Table.Base()-tableEntries))
 			tableEntries = decoder.Table.Base()
 		}
 
@@ -447,10 +455,12 @@ func TestQpackDecoderOrdered(t *testing.T) {
 		assert.Nil(t, err)
 		headers, err := decoder.ReadHeaderBlock(bytes.NewReader(encoded), token)
 		assert.Nil(t, err)
+		if needsAcknowledgment(encoded) {
+			// 0 is the 1-bit instruction for a header block ack.
+			checkAck(t, ackReader, 1, token)
+		}
 
 		assert.Equal(t, tc.headers, headers)
-		// 0 is the 1-bit instruction for a header block ack.
-		checkAck(t, ackReader, 0, token)
 		token++
 	}
 }
@@ -503,7 +513,18 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 	controlDone := make(chan struct{})
 	headerDone := new(sync.WaitGroup)
 
-	fin := func() {
+	tmpAckReader, decoderWriter := io.Pipe()
+	ackReader := hc.NewReader(tmpAckReader)
+	expectedAcks := make(chan uint64)
+	go func() {
+		// This test delays Table State Synchronize and doesn't reset streams, so only
+		// header block acknowledgements are necessary.
+		for ack := range expectedAcks {
+			checkAck(t, ackReader, 1, ack)
+		}
+	}()
+
+	cleanup := func() {
 		controlWriter.Close()
 		<-controlDone
 		if batchRead {
@@ -514,10 +535,10 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 	for i, tc := range testData {
 		if tc.resetTable {
 			if controlReader != nil {
-				fin()
+				cleanup()
 			}
-			var ackBuf bytes.Buffer
-			decoder = hc.NewQpackDecoder(&ackBuf, 256)
+			decoder = hc.NewQpackDecoder(decoderWriter, 256)
+			decoder.SetAckDelay(time.Second)
 			controlReader, controlWriter = io.Pipe()
 			go func() {
 				err := decoder.ReadTableUpdates(controlReader)
@@ -531,13 +552,16 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 		assert.Nil(t, err)
 		nr := NewNotifyingReader(headerBytes)
 
-		go func(i int, tc testCase, r io.Reader) {
+		go func(i uint64, tc testCase, r io.Reader) {
 			defer headerDone.Done()
-			headers, err := decoder.ReadHeaderBlock(r, uint64(i))
+			headers, err := decoder.ReadHeaderBlock(r, i)
 			assert.Nil(t, err)
+			if needsAcknowledgment(headerBytes) {
+				expectedAcks <- i
+			}
 
 			assert.Equal(t, tc.headers, headers)
-		}(i, tc, nr)
+		}(uint64(i), tc, nr)
 
 		// After setting up the header block to decode, feed the control stream to the
 		// reader.  First, wait for the header block reader to take a byte.
@@ -553,7 +577,8 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 			headerDone.Wait()
 		}
 	}
-	fin()
+	cleanup()
+	close(expectedAcks)
 }
 
 // This uses the default arrangement, so that table updates appear immediately

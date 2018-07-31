@@ -3,11 +3,17 @@ package hc
 import (
 	"errors"
 	"io"
+	"time"
 )
 
 // ErrTableOverflow is raised when an insert is too large for the table.
 // Unlike HPACK, QPACK doesn't allow this.
 var ErrTableOverflow = errors.New("inserting entry that is too large for the table")
+
+type headerBlockAck struct {
+	id               uint64
+	largestReference int
+}
 
 // QpackDecoder is the top-level class for header decompression.
 // This is intended to be concurrency-safe for reading of header blocks
@@ -16,9 +22,10 @@ var ErrTableOverflow = errors.New("inserting entry that is too large for the tab
 type QpackDecoder struct {
 	decoderCommon
 	table        *QpackDecoderTable
-	available    chan<- int
-	acknowledged chan<- uint64
+	acknowledged chan<- *headerBlockAck
 	cancelled    chan<- uint64
+	available    chan<- int
+	ackDelay     time.Duration
 }
 
 // NewQpackDecoder makes and sets up a QpackDecoder.
@@ -28,7 +35,7 @@ func NewQpackDecoder(aw io.Writer, capacity TableCapacity) *QpackDecoder {
 	decoder.Table = decoder.table
 	available := make(chan int)
 	decoder.available = available
-	acknowledged := make(chan uint64)
+	acknowledged := make(chan *headerBlockAck)
 	decoder.acknowledged = acknowledged
 	cancelled := make(chan uint64)
 	decoder.cancelled = cancelled
@@ -37,30 +44,57 @@ func NewQpackDecoder(aw io.Writer, capacity TableCapacity) *QpackDecoder {
 }
 
 func (decoder *QpackDecoder) writeAcknowledgements(aw io.Writer, available <-chan int,
-	acknowledged <-chan uint64, cancelled <-chan uint64) {
+	acknowledged <-chan *headerBlockAck, cancelled <-chan uint64) {
 	w := NewWriter(aw)
+
+	// These values are used to track whether to send Table State Synchronize, which we do on a delayed timer.
+	var largestAcknowledged int
+	var syncLargest int
+	tss := make(chan struct{})
+	delayTss := true
 	for {
 		var v uint64
 		var err error
 		var remaining byte
+
 		select {
 		case ack := <-acknowledged:
-			// Header block ack: instruction = b0
-			err = w.WriteBit(0)
+			largestAcknowledged = ack.largestReference
+			v = ack.id
 			remaining = 7
-			v = ack
-
-		case entry := <-available:
-			// Table update ack: instruction = b10
-			err = w.WriteBits(2, 2)
-			remaining = 6
-			v = uint64(entry)
+			// Header Acknowledgment: instruction = b1
+			err = w.WriteBit(1)
 
 		case cancel := <-cancelled:
-			// Stream reset ack: instruction = b11
-			err = w.WriteBits(3, 2)
-			remaining = 6
 			v = cancel
+			remaining = 6
+			// Stream Cancellation: instruction = b01
+			err = w.WriteBits(1, 2)
+
+		case entry := <-available:
+			if syncLargest < entry {
+				syncLargest = entry
+				if delayTss {
+					delayTss = false
+					go func() {
+						<-time.After(decoder.ackDelay)
+						tss <- struct{}{}
+					}()
+				}
+			}
+			continue
+
+		case <-tss:
+			// This is an incremental instruction, which might not need to be run.
+			delayTss = true
+			if syncLargest <= largestAcknowledged {
+				continue
+			}
+			v = uint64(syncLargest - largestAcknowledged)
+			largestAcknowledged = syncLargest
+			remaining = 6
+			// Table State Synchronize: instruction = b00
+			err = w.WriteBits(0, 2)
 		}
 		if err != nil {
 			// TODO: close the connection instead of just disappearing
@@ -71,6 +105,12 @@ func (decoder *QpackDecoder) writeAcknowledgements(aw io.Writer, available <-cha
 			return
 		}
 	}
+}
+
+// SetAckDelay sets the delay for the Table State Synchronize instruction.
+// This value should probably correspond to the ACK delay used in the transport.
+func (decoder *QpackDecoder) SetAckDelay(delay time.Duration) {
+	decoder.ackDelay = delay
 }
 
 // ServiceUpdates reads from the given reader, updating the header table as needed.
@@ -306,34 +346,34 @@ func (decoder *QpackDecoder) readLiteralWithNameLiteral(reader *Reader, base int
 
 // readBase reads the header block header and blocks until the decoder is
 // ready to process the remainder of the block.
-func (decoder *QpackDecoder) readBase(reader *Reader) (int, error) {
+func (decoder *QpackDecoder) readBase(reader *Reader) (int, int, error) {
 	largestReference, err := reader.ReadIndex(8)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	// This blocks until the dynamic table is ready.
 	decoder.table.WaitForEntry(largestReference)
 
 	sign, err := reader.ReadBit()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	delta, err := reader.ReadIndex(7)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if sign == 1 && delta == 0 {
-		return 0, errors.New("invalid delta for base index")
+		return 0, 0, errors.New("invalid delta for base index")
 	}
 	// Sign: 1 means negative, 0 means positive.
 	base := largestReference + (delta * int(1-2*sign))
-	return base, nil
+	return largestReference, base, nil
 }
 
 // ReadHeaderBlock decodes header fields as they arrive.
 func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderField, error) {
 	reader := NewReader(r)
-	base, err := decoder.readBase(reader)
+	largestReference, base, err := decoder.readBase(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +442,9 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 	if err != nil {
 		return nil, err
 	}
-	decoder.acknowledged <- id
+	if largestReference > 0 {
+		decoder.acknowledged <- &headerBlockAck{id, largestReference}
+	}
 	return headers, nil
 }
 

@@ -160,10 +160,8 @@ func (hbu *qpackHeaderBlockUsage) ack() {
 
 type qpackStreamUsage []*qpackHeaderBlockUsage
 
-func (su *qpackStreamUsage) next() *qpackHeaderBlockUsage {
-	block := &qpackHeaderBlockUsage{}
+func (su *qpackStreamUsage) add(block *qpackHeaderBlockUsage) {
 	*su = append(*su, block)
-	return block
 }
 
 // ack removes the oldest header block usage,

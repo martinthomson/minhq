@@ -52,7 +52,15 @@ func (state *qpackWriterState) setupUsage(streamUsage *qpackStreamUsage, highest
 			state.maxBase = highestAcknowledged
 		}
 	}
-	state.uses = streamUsage.next()
+	state.uses = &qpackHeaderBlockUsage{}
+}
+
+// recordUsage registers the usage tracker as necessary.
+// Usage isn't tracked if the header block doesn't use the dynamic table.
+func (state *qpackWriterState) recordUsage(streamUsage *qpackStreamUsage) {
+	if state.largestBase > 0 {
+		streamUsage.add(state.uses)
+	}
 }
 
 func dynBase(e Entry) int {
@@ -162,13 +170,13 @@ func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) {
 			return
 		}
 		switch b {
-		case 0:
+		case 1:
 			v, err := r.ReadInt(7)
 			if err != nil {
 				return
 			}
 			encoder.AcknowledgeHeader(v)
-		case 1:
+		case 0:
 			b, err = r.ReadBit()
 			if err != nil {
 				return
@@ -358,6 +366,8 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint6
 			return err
 		}
 	}
+
+	state.recordUsage(streamUsage)
 	return nil
 }
 
@@ -508,26 +518,19 @@ func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
 	return encoder.writeHeaderBlock(headerWriter, &state)
 }
 
-// This is run only when the encoder mutex is taken.
-func (encoder *QpackEncoder) updateHighestAcknowledged(base int) {
-	if base > encoder.highestAcknowledged {
-		encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
-		encoder.highestAcknowledged = base
-	}
-}
-
 // AcknowledgeInsert acknowledges that the remote decoder has received a
-// insert or duplicate instructions up to the specified base.
-func (encoder *QpackEncoder) AcknowledgeInsert(base int) {
+// new insert or duplicate instructions.
+func (encoder *QpackEncoder) AcknowledgeInsert(increment int) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	if base > encoder.highestAcknowledged {
+	if increment > 0 {
+		base := encoder.highestAcknowledged + increment
 		encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
 		encoder.highestAcknowledged = base
 	}
 }
 
-// Acknowledge is called when a header block has been acknowledged by the peer.
+// AcknowledgeHeader is called when a header block has been acknowledged by the peer.
 // This allows dynamic table entries to be evicted as necessary on the next
 // call.
 func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) {

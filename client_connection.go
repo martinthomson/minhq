@@ -124,17 +124,15 @@ func (c *ClientConnection) getPushPromise(pushID uint64) *PushPromise {
 	return promise
 }
 
-func (c *ClientConnection) handlePushStream(s *recvStream) {
+func (c *ClientConnection) handlePushStream(s *recvStream) error {
 	pushID, err := s.ReadVarint()
 	if err != nil {
-		c.FatalError(ErrWtf)
-		return
+		return err
 	}
 
 	promise := c.getPushPromise(pushID)
 	if promise.isFulfilled() {
-		c.FatalError(ErrWtf)
-		return
+		return errors.New("double fulfilment of promise")
 	}
 
 	resp := &ClientResponse{
@@ -160,19 +158,20 @@ func (c *ClientConnection) handlePushStream(s *recvStream) {
 		return ErrUnsupportedFrame
 	})
 	if err != nil {
-		return
+		return err
 	}
 	c.creditPushes(1)
+	return nil
 }
 
 // HandleUnidirectionalStream manages receipt of a new unidirectional stream.
 // For clients, that's just push for now.
-func (c *ClientConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) {
+func (c *ClientConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) error {
 	switch t {
 	case unidirectionalStreamPush:
-		c.handlePushStream(s)
+		return c.handlePushStream(s)
 	default:
-		s.StopSending(uint16(ErrHttpUnknownStreamType))
+		return s.StopSending(uint16(ErrHttpUnknownStreamType))
 	}
 }
 

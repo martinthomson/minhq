@@ -99,7 +99,7 @@ type Config struct {
 // connectionHandler is used by subclasses of connection to deal with frames that only they handle.
 type connectionHandler interface {
 	HandleFrame(FrameType, FrameReader) error
-	HandleUnidirectionalStream(unidirectionalStreamType, *recvStream)
+	HandleUnidirectionalStream(unidirectionalStreamType, *recvStream) error
 }
 
 // connection is an abstract wrapper around mw.Connection (a wrapper around
@@ -184,31 +184,27 @@ func (c *connection) sendSettings() error {
 // This spits out a SETTINGS frame and then sits there reading the control
 // stream until it encounters an error.
 func (c *connection) serviceControlStream(controlStream *recvStream,
-	handler connectionHandler, ready chan<- struct{}) {
+	handler connectionHandler, ready chan<- struct{}) error {
 	t, r, err := controlStream.ReadFrame()
 	if err != nil {
-		c.FatalError(ErrWtf)
-		return
+		return err
 	}
 
 	if t != frameSettings {
-		c.FatalError(ErrWtf)
-		return
+		return err
 	}
 
 	sr := settingsReader{c}
 	err = sr.readSettings(r)
 	if err != nil {
-		c.FatalError(ErrWtf)
-		return
+		return err
 	}
 	close(ready)
 
 	for {
 		t, r, err = controlStream.ReadFrame()
 		if err != nil {
-			c.FatalError(ErrWtf)
-			return
+			return err
 		}
 		switch t {
 		case framePriority:
@@ -217,8 +213,7 @@ func (c *connection) serviceControlStream(controlStream *recvStream,
 			err = handler.HandleFrame(t, r)
 		}
 		if err != nil {
-			c.FatalError(ErrWtf)
-			return
+			return err
 		}
 	}
 }
@@ -238,11 +233,14 @@ func (c *connection) serviceUnidirectionalStreams(handler connectionHandler,
 			case unidirectionalStreamControl:
 				c.serviceControlStream(s, handler, ready)
 			case unidirectionalStreamQpackDecoder:
-				c.encoder.ServiceAcknowledgments(s)
+				err = c.encoder.ServiceAcknowledgments(s)
 			case unidirectionalStreamQpackEncoder:
-				c.decoder.ServiceUpdates(s)
+				err = c.decoder.ServiceUpdates(s)
 			default:
-				handler.HandleUnidirectionalStream(t, s)
+				err = handler.HandleUnidirectionalStream(t, s)
+			}
+			if err != nil {
+				c.FatalError(ErrWtf)
 			}
 		}(newRecvStream(s))
 	}

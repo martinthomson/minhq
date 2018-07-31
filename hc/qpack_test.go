@@ -51,7 +51,7 @@ func TestQpackEncoder(t *testing.T) {
 		} else {
 			// We can use the same id here because always acknowledge before encoding
 			// the next block.
-			encoder.AcknowledgeHeader(id)
+			assert.Nil(t, encoder.AcknowledgeHeader(id))
 		}
 		updateBuf.Reset()
 
@@ -233,7 +233,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 
 	// Acknowledging the setup stream should allow the header block to
 	// reference the entries added during setup.  And it can block itself.
-	encoder.AcknowledgeHeader(setupToken)
+	assert.Nil(t, encoder.AcknowledgeHeader(setupToken))
 
 	headerBuf.Reset()
 	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken,
@@ -389,7 +389,7 @@ func TestNotIndexedNameReference(t *testing.T) {
 
 	// Even after acknowledging the header block from setup, the reference to the
 	// initial name1 entry remains outstanding and blocks eviction.
-	encoder.AcknowledgeHeader(setupToken)
+	assert.Nil(t, encoder.AcknowledgeHeader(setupToken))
 	assertQpackTableFull(t, encoder, &updateBuf)
 }
 

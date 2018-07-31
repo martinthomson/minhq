@@ -161,36 +161,38 @@ func NewQpackEncoder(hw io.Writer, capacity TableCapacity, margin TableCapacity)
 }
 
 // ServiceAcknowledgments reads from the stream of acknowledgments and feeds those to the encoder.
-func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) {
+func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) error {
 	r := NewReader(ar)
 	for {
 		b, err := r.ReadBit()
 		if err != nil {
-			// TODO kill the connection on errors here
-			return
+			return err
 		}
 		switch b {
 		case 1:
 			v, err := r.ReadInt(7)
 			if err != nil {
-				return
+				return err
 			}
-			encoder.AcknowledgeHeader(v)
+			err = encoder.AcknowledgeHeader(v)
 		case 0:
 			b, err = r.ReadBit()
 			if err != nil {
-				return
+				return err
 			}
 			v, err := r.ReadInt(6)
 			if err != nil {
-				return
+				return err
 			}
 			switch b {
 			case 0:
-				encoder.AcknowledgeInsert(int(v))
+				err = encoder.AcknowledgeInsert(int(v))
 			case 1:
-				encoder.AcknowledgeReset(v)
+				err = encoder.AcknowledgeReset(v)
 			}
+		}
+		if err != nil {
+			return err
 		}
 	}
 }
@@ -520,39 +522,51 @@ func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
 
 // AcknowledgeInsert acknowledges that the remote decoder has received a
 // new insert or duplicate instructions.
-func (encoder *QpackEncoder) AcknowledgeInsert(increment int) {
+func (encoder *QpackEncoder) AcknowledgeInsert(increment int) error {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	if increment > 0 {
-		base := encoder.highestAcknowledged + increment
-		encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
-		encoder.highestAcknowledged = base
+	if increment <= 0 {
+		return ErrIndexError
 	}
+	base := encoder.highestAcknowledged + increment
+	if base > encoder.Table.Base() {
+		return ErrIndexError
+	}
+	encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
+	encoder.highestAcknowledged = base
+	return nil
 }
 
 // AcknowledgeHeader is called when a header block has been acknowledged by the peer.
-// This allows dynamic table entries to be evicted as necessary on the next
-// call.
-func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) {
+// This allows dynamic table entries to be evicted as necessary on the next call.
+func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) error {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	removedLargest, newLargest := encoder.usage.ack(id)
+	if removedLargest == 0 {
+		return ErrIndexError
+	}
 	if removedLargest > encoder.highestAcknowledged && newLargest <= encoder.highestAcknowledged {
 		encoder.blockedStreams--
 		encoder.highestAcknowledged = removedLargest
 	}
+	return nil
 }
 
 // AcknowledgeReset is used when this side resets a stream.  When the decoder
 // discovers that it might not be able to acknowledge all the header blocks,
 // it sends a cancellation acknowledgment that we need to consume.
-func (encoder *QpackEncoder) AcknowledgeReset(id uint64) {
+func (encoder *QpackEncoder) AcknowledgeReset(id uint64) error {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
 	largest := encoder.usage.cancel(id)
+	if largest < 0 {
+		return ErrIndexError // unknown stream ID
+	}
 	if largest > encoder.highestAcknowledged {
 		encoder.blockedStreams--
 	}
+	return nil
 }
 
 // SetCapacity sets the table capacity. This panics if it is called when the

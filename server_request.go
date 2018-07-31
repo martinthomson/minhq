@@ -39,7 +39,7 @@ func (req *ServerRequest) Method() string {
 	return req.method
 }
 
-// Target returns the request target.
+// Target returns the target URL of the request.
 func (req *ServerRequest) Target() *url.URL {
 	return req.target
 }

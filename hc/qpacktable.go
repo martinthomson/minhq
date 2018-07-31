@@ -167,6 +167,9 @@ func (su *qpackStreamUsage) add(block *qpackHeaderBlockUsage) {
 // ack removes the oldest header block usage,
 // returns the largest reference in that blocks.
 func (su *qpackStreamUsage) ack() int {
+	if len(*su) == 0 {
+		return 0
+	}
 	z := (*su)[0]
 	z.ack()
 	*su = (*su)[1:]
@@ -231,8 +234,7 @@ func (ut *qpackUsageTracker) ack(id uint64) (int, int) {
 func (ut *qpackUsageTracker) cancel(id uint64) int {
 	su := (*ut)[id]
 	if su == nil {
-		// TODO report an error rather than just passing this silently
-		return 0
+		return -1
 	}
 	largest := su.cancel()
 	delete(*ut, id)

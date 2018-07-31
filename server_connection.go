@@ -133,6 +133,6 @@ func (c *ServerConnection) HandleFrame(t FrameType, r FrameReader) error {
 }
 
 // HandleUnidirectionalStream causes a fatal error because servers don't expect to see these.
-func (c *ServerConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) {
-	s.StopSending(uint16(ErrHttpUnknownStreamType))
+func (c *ServerConnection) HandleUnidirectionalStream(t unidirectionalStreamType, s *recvStream) error {
+	return s.StopSending(uint16(ErrHttpUnknownStreamType))
 }

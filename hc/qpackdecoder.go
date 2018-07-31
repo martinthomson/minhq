@@ -114,19 +114,17 @@ func (decoder *QpackDecoder) SetAckDelay(delay time.Duration) {
 }
 
 // ServiceUpdates reads from the given reader, updating the header table as needed.
-func (decoder *QpackDecoder) ServiceUpdates(hr io.Reader) {
+func (decoder *QpackDecoder) ServiceUpdates(hr io.Reader) error {
 	r := NewReader(hr)
 	for {
 		blockLen, err := r.ReadInt(8)
 		if err != nil {
-			// TODO report this error
-			return
+			return err
 		}
 		block := &io.LimitedReader{R: r, N: int64(blockLen)}
 		err = decoder.ReadTableUpdates(block)
 		if err != nil {
-			// TODO report this error
-			return
+			return err
 		}
 	}
 }

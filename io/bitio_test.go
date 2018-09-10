@@ -1,11 +1,11 @@
-package bitio_test
+package io_test
 
 import (
 	"bytes"
 	"io"
 	"testing"
 
-	"github.com/martinthomson/minhq/bitio"
+	bitio "github.com/martinthomson/minhq/io"
 	"github.com/stvp/assert"
 )
 

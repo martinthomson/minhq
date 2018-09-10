@@ -113,7 +113,7 @@ func (table *tableCommon) GetDynamic(i int, base int) Entry {
 		return nil
 	}
 	dynIndex := i + delta
-	if dynIndex >= len(table.dynamic) {
+	if dynIndex >= len(table.dynamic) || dynIndex < 0 {
 		return nil
 	}
 	return table.dynamic[dynIndex]

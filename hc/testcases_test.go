@@ -59,7 +59,7 @@ var testCases = []testCase{
 		hpack:        "040c2f73616d706c652f70617468",
 		hpackTable:   nil,
 		qpackUpdates: "",
-		qpackHeader:  "0000100c2f73616d706c652f70617468",
+		qpackHeader:  "0000500c2f73616d706c652f70617468",
 	},
 	{
 		resetTable: true,
@@ -70,7 +70,7 @@ var testCases = []testCase{
 		hpack:        "100870617373776f726406736563726574",
 		hpackTable:   nil,
 		qpackUpdates: "",
-		qpackHeader:  "0000770170617373776f726406736563726574",
+		qpackHeader:  "0000370170617373776f726406736563726574",
 	},
 	{
 		resetTable: true,
@@ -272,8 +272,8 @@ var testCases = []testCase{
 			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 		qpackUpdates: "",
-		qpackHeader: "0300d582131d4d6f6e2c203231204f637420323031332032303a31333a" +
-			"323220474d5480ff0f1d38666f6f3d4153444a4b48514b425a584f5157454f50495" +
+		qpackHeader: "0300d582531d4d6f6e2c203231204f637420323031332032303a31333a" +
+			"323220474d5480ff0f5d38666f6f3d4153444a4b48514b425a584f5157454f50495" +
 			"541585157454f49553b206d61782d6167653d333630303b2076657273696f6e3d31",
 		qpackTable: &[]dynamicTableEntry{
 			{":status", "307"},
@@ -349,8 +349,8 @@ var testCases = []testCase{
 			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 		qpackUpdates: "",
-		qpackHeader: "0300" + "d5" + "82" + "1396d07abe941054d444a8200595040b8166e084a62d1bff" +
-			"80" + "ff0f" + "1dad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1" + "ab270fb5291f9587316065c003ed4ee5b1063d5007",
+		qpackHeader: "0300" + "d5" + "82" + "5396d07abe941054d444a8200595040b8166e084a62d1bff" +
+			"80" + "ff0f" + "5dad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1" + "ab270fb5291f9587316065c003ed4ee5b1063d5007",
 		qpackTable: &[]dynamicTableEntry{
 			{":status", "307"},
 			{"location", "https://www.example.com"},

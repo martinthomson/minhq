@@ -130,7 +130,7 @@ func assertQpackTableFull(t *testing.T, encoder *hc.QpackEncoder, updateBuf *byt
 	t.Logf("Table Full: [%x] %x", updateBuf.Bytes(), headerBuf.Bytes())
 	assert.Equal(t, 0, updateBuf.Len())
 
-	expectedHeader, err := hex.DecodeString("00006ca874965f85ee3a2d2cbf")
+	expectedHeader, err := hex.DecodeString("00002ca874965f85ee3a2d2cbf")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -192,7 +192,7 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
-	expectedHeader, err := hex.DecodeString("0300806ca874943f85ee3a2d287f")
+	expectedHeader, err := hex.DecodeString("0300802ca874943f85ee3a2d287f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -222,7 +222,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	t.Logf("Blocked on setup: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	assert.Equal(t, []byte{}, updateBuf.Bytes())
-	expectedHeader, err := hex.DecodeString("00006ca874943f85ee3a2d287f")
+	expectedHeader, err := hex.DecodeString("00002ca874943f85ee3a2d287f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -294,7 +294,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	t.Logf("Other Stream: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	assert.Equal(t, []byte{}, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("0200806ca874959f85ee3a2d2b3f")
+	expectedHeader, err = hex.DecodeString("0200802ca874959f85ee3a2d2b3f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -378,7 +378,7 @@ func TestNotIndexedNameReference(t *testing.T) {
 
 	assert.Equal(t, 0, updateBuf.Len())
 
-	expectedHeader, err := hex.DecodeString("01000085ee3a2d2bff")
+	expectedHeader, err := hex.DecodeString("01004085ee3a2d2bff")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 

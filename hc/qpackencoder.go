@@ -385,7 +385,7 @@ func (encoder *QpackEncoder) writeIndexed(writer *Writer, state *qpackWriterStat
 			// This is a post-base index.
 			prefix = 4
 			index = -1 - index // -1 --> 0, -2 --> 1
-			err = writer.WriteBits(4, 4)
+			err = writer.WriteBits(1, 4)
 		} else {
 			prefix = 6
 			err = writer.WriteBits(2, 2)
@@ -419,15 +419,16 @@ func (encoder *QpackEncoder) writeLiteralNameReference(writer *Writer, state *qp
 		if index < 0 {
 			// Post-base index
 			prefix = 3
-			err = writer.WriteBits(10|sensitive, 5)
+			err = writer.WriteBits(sensitive, 5)
+			index = -1 - index
 		} else {
 			prefix = 4
-			err = writer.WriteBits(sensitive<<1, 4)
+			err = writer.WriteBits(4|sensitive<<1, 4)
 		}
 	} else {
 		index = encoder.Table.Index(nameMatch)
 		prefix = 4
-		err = writer.WriteBits(sensitive<<1|1, 4)
+		err = writer.WriteBits(5|sensitive<<1, 4)
 	}
 	if err != nil {
 		return err
@@ -448,7 +449,7 @@ func (encoder *QpackEncoder) writeLiteral(writer *Writer, state *qpackWriterStat
 	if nameMatch != nil {
 		err = encoder.writeLiteralNameReference(writer, state, sensitive, nameMatch)
 	} else {
-		err = writer.WriteBits(6|sensitive, 4)
+		err = writer.WriteBits(2|sensitive, 4)
 		if err != nil {
 			return err
 		}

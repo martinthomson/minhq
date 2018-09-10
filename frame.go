@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/martinthomson/minhq/bitio"
+	bitio "github.com/martinthomson/minhq/io"
 )
 
 // FrameType is the type of an HTTP/QUIC frame.

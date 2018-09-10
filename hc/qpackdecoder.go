@@ -230,10 +230,10 @@ func (decoder *QpackDecoder) ReadTableUpdates(r io.Reader) error {
 		if err != nil {
 			return err
 		}
-		if b == 0 {
-			err = decoder.readDuplicate(reader, base)
-		} else {
+		if b == 1 {
 			err = decoder.readDynamicUpdate(reader)
+		} else {
+			err = decoder.readDuplicate(reader, base)
 		}
 		if err != nil {
 			return err
@@ -398,7 +398,7 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 		if err != nil {
 			return nil, err
 		}
-		if b == 0 {
+		if b == 1 {
 			h, err := decoder.readLiteralWithNameReference(reader, base)
 			if err != nil {
 				return nil, err
@@ -425,7 +425,7 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 			return nil, err
 		}
 		var h *HeaderField
-		if b == 0 {
+		if b == 1 {
 			h, err = decoder.readPostBaseIndexed(reader, base)
 		} else {
 			h, err = decoder.readLiteralWithPostBaseNameReference(reader, base)

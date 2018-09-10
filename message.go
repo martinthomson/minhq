@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/martinthomson/minhq/hc"
+	bitio "github.com/martinthomson/minhq/io"
 )
 
 func buildRequestHeaderFields(method string, base *url.URL, target string, headers []hc.HeaderField) (*url.URL, []hc.HeaderField, error) {
@@ -116,10 +117,10 @@ type incomingMessageFrameHandler func(FrameType, io.Reader) error
 // IncomingMessage is the common parts of inbound messages (requests for
 // servers, responses for clients).
 type IncomingMessage struct {
-	s       *recvStream
-	decoder *hc.QpackDecoder
-	Headers headerFieldArray
-	concatenatingReader
+	s        *recvStream
+	decoder  *hc.QpackDecoder
+	Headers  headerFieldArray
+	reader   *bitio.ConcatenatingReader
 	Trailers <-chan []hc.HeaderField
 	trailers chan<- []hc.HeaderField
 }
@@ -127,14 +128,10 @@ type IncomingMessage struct {
 func newIncomingMessage(s *recvStream, decoder *hc.QpackDecoder, headers []hc.HeaderField) IncomingMessage {
 	trailers := make(chan []hc.HeaderField)
 	return IncomingMessage{
-		s:       s,
-		decoder: decoder,
-		Headers: headers,
-		concatenatingReader: concatenatingReader{
-			current: nil,
-			pending: make(chan io.Reader),
-			drained: make(chan struct{}),
-		},
+		s:        s,
+		decoder:  decoder,
+		Headers:  headers,
+		reader:   bitio.NewConcatenatingReader(),
 		Trailers: trailers,
 		trailers: trailers,
 	}
@@ -143,7 +140,7 @@ func newIncomingMessage(s *recvStream, decoder *hc.QpackDecoder, headers []hc.He
 func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 	frameHandler incomingMessageFrameHandler) error {
 	defer close(msg.trailers)
-	defer msg.concatenatingReader.Close()
+	defer msg.reader.Close()
 
 	err := func() error {
 		gotFirstHeaders := false
@@ -165,7 +162,7 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 				if !gotFirstHeaders {
 					return ErrInvalidFrame
 				}
-				msg.concatenatingReader.Add(r)
+				msg.reader.Add(r)
 
 			case frameHeaders:
 				headers, err := msg.decoder.ReadHeaderBlock(r, msg.s.Id())
@@ -207,49 +204,6 @@ func (msg *IncomingMessage) GetHeader(n string) string {
 // String just formats headers.
 func (msg *IncomingMessage) String() string {
 	return msg.Headers.String()
-}
-
-type concatenatingReader struct {
-	current io.Reader
-	pending chan io.Reader
-	drained chan struct{}
-}
-
-// Add adds a reader, then holds until it is fully drained.
-func (cat *concatenatingReader) Add(r io.Reader) {
-	cat.pending <- r
-	<-cat.drained
-}
-
-func (cat *concatenatingReader) Close() error {
-	close(cat.pending)
-	return nil
-}
-
-func (cat *concatenatingReader) next() bool {
-	if cat.current != nil {
-		cat.drained <- struct{}{}
-	}
-	cat.current = <-cat.pending
-	return cat.current != nil
-}
-
-// Read can be called from any thread, but only one thread.
-func (cat *concatenatingReader) Read(p []byte) (int, error) {
-	if cat.current == nil {
-		if !cat.next() {
-			return 0, io.EOF
-		}
-	}
-
-	n, err := cat.current.Read(p)
-	for err == io.EOF {
-		if !cat.next() {
-			return 0, io.EOF
-		}
-		n, err = cat.current.Read(p)
-	}
-	return n, err
 }
 
 // OutgoingMessage contains the common parts of outgoing messages (requests for

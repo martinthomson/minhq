@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 
-	"github.com/martinthomson/minhq/bitio"
+	bitio "github.com/martinthomson/minhq/io"
 )
 
 // ErrIntegerOverflow is used to signal integer overflow.

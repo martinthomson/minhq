@@ -1,4 +1,4 @@
-package bitio
+package io
 
 import (
 	"bytes"

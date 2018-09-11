@@ -76,6 +76,7 @@ func NewHpackDecoder() *HpackDecoder {
 	decoder := new(HpackDecoder)
 	decoder.table = new(HpackTable)
 	decoder.Table = decoder.table
+	decoder.initLogging(nil)
 	return decoder
 }
 
@@ -232,6 +233,7 @@ func NewHpackEncoder(capacity TableCapacity) *HpackEncoder {
 	encoder.table = new(HpackTable)
 	encoder.Table = encoder.table
 	encoder.SetCapacity(capacity)
+	encoder.initLogging(nil)
 	return encoder
 }
 

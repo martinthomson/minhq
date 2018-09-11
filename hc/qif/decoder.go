@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"github.com/martinthomson/minhq/hc"
@@ -82,7 +83,9 @@ func (dec *decoder) writeBlock(block []hc.HeaderField) {
 	dec.output.Write([]byte{'\n'})
 }
 
-func (dec *decoder) Decode() {
+func (dec *decoder) Decode(logger *log.Logger) {
+	dec.qpack.SetLogger(logger)
+
 	// Setup the update stream.
 	updateStream := hqio.NewConcatenatingReader()
 	go func() {
@@ -99,8 +102,8 @@ func (dec *decoder) Decode() {
 		var blockBytes bytes.Buffer
 		_, err = io.Copy(&blockBytes, reader)
 		check(err)
-		os.Stderr.WriteString(fmt.Sprintf("%x [%d] %x\n",
-			stream, blockBytes.Len(), blockBytes.Bytes()))
+		logger.Printf("%x [%d] %x\n", stream, blockBytes.Len(), blockBytes.Bytes())
+
 		reader = &blockBytes
 
 		if stream == 0 {

@@ -280,11 +280,11 @@ type QpackEncoderTable struct {
 // NewQpackEncoderTable makes a new encoder table. Note that margin is the
 // amount of space we reserve. Entries that spill over into that space are not
 // referenced by the encoder.
-func NewQpackEncoderTable(capacity TableCapacity, margin TableCapacity) *QpackEncoderTable {
-	return &QpackEncoderTable{
-		qpackTableCommon{tableCommon{capacity: capacity}},
-		capacity - margin, 0, 0,
-	}
+func NewQpackEncoderTable(capacity TableCapacity, referenceable TableCapacity) *QpackEncoderTable {
+	var qt QpackEncoderTable
+	qt.SetCapacity(capacity)
+	qt.SetReferenceableLimit(referenceable)
+	return &qt
 }
 
 func (qt *QpackEncoderTable) added(increase TableCapacity) {
@@ -390,7 +390,34 @@ func (qt *QpackEncoderTable) LookupExtra(name string, value string) (DynamicEntr
 // zero value.
 func (qt *QpackEncoderTable) SetCapacity(c TableCapacity) {
 	if qt.Base() > 0 {
+		// TODO implement something sensible here
 		panic("Can't change encoder table size after inserting anything")
 	}
 	qt.capacity = c
+	if qt.referenceableLimit > c {
+		qt.SetReferenceableLimit(qt.referenceableLimit)
+	}
+}
+
+// SetReferenceableLimit limits the space in the table that can be used.
+// This value is set to the minimum of the provided value and the capacity.
+func (qt *QpackEncoderTable) SetReferenceableLimit(limit TableCapacity) {
+	if limit > qt.capacity {
+		limit = qt.capacity
+	}
+
+	qt.referenceableLimit = limit
+	qt.referenceableSize = 0
+	qt.referenceable = 0
+
+	remainingSpace := qt.referenceableLimit
+	for i := range qt.dynamic {
+		sz := qt.dynamic[i].Size()
+		if sz < remainingSpace {
+			qt.referenceable++
+			qt.referenceableSize += sz
+		} else {
+			break
+		}
+	}
 }

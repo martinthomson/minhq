@@ -4,6 +4,7 @@ QIFDIR="${QIFDIR:-~/code/qif}"
 QIFCOMMIT="${QIFCOMMIT:-master}"
 CHECKED=0
 ERRORS=()
+NOOP="${NOOP:-}"
 
 # Temporary file management.
 TMPFILES=()
@@ -17,7 +18,7 @@ createTempFile() {
 # Usage: runDiff <encoded> <reference>
 runDiff() {
     echo "diff -u <(go run github.com/martinthomson/minhq/hc/qif decode \"$1\") \"$2\""
-    diff -u <(go run github.com/martinthomson/minhq/hc/qif decode "$1") "$2" 2>&1
+    [[ -z "$NOOP" ]] && diff -u <(go run github.com/martinthomson/minhq/hc/qif decode "$1") "$2" 2>&1
 }
 
 # Usage: checkDecode <encoded> <reference>

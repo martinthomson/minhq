@@ -31,7 +31,7 @@ func TestQpackEncoder(t *testing.T) {
 	for _, tc := range testCases {
 		if tc.resetTable {
 			t.Log("Reset encoder")
-			encoder = hc.NewQpackEncoder(&updateBuf, 256, 0)
+			encoder = hc.NewQpackEncoder(&updateBuf, 256, 256)
 			encoder.SetMaxBlockedStreams(100)
 			// The examples in RFC 7541 index date, which is of questionable utility.
 			encoder.SetIndexPreference("date", true)
@@ -164,7 +164,7 @@ func TestQpackDuplicate(t *testing.T) {
 // table is too small to allow it.
 func TestQpackDuplicateLiteral(t *testing.T) {
 	var updateBuf bytes.Buffer
-	encoder := hc.NewQpackEncoder(&updateBuf, 150, 50)
+	encoder := hc.NewQpackEncoder(&updateBuf, 150, 100)
 	setupEncoder(t, encoder, &updateBuf)
 
 	var headerBuf bytes.Buffer
@@ -195,7 +195,7 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 
 func TestQpackBlockedEncode(t *testing.T) {
 	var updateBuf bytes.Buffer
-	encoder := hc.NewQpackEncoder(&updateBuf, 250, 50)
+	encoder := hc.NewQpackEncoder(&updateBuf, 250, 200)
 	setupEncoder(t, encoder, &updateBuf)
 
 	// Limit to just one blocking stream.
@@ -325,7 +325,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 // Use a name reference and ensure that it can't be evicted.
 func TestQpackNameReference(t *testing.T) {
 	var updateBuf bytes.Buffer
-	encoder := hc.NewQpackEncoder(&updateBuf, 150, 0)
+	encoder := hc.NewQpackEncoder(&updateBuf, 150, 150)
 	setupEncoder(t, encoder, &updateBuf)
 
 	var headerBuf bytes.Buffer
@@ -353,7 +353,7 @@ func TestQpackNameReference(t *testing.T) {
 // This tests that a name reference can be created on a literal.
 func TestNotIndexedNameReference(t *testing.T) {
 	var updateBuf bytes.Buffer
-	encoder := hc.NewQpackEncoder(&updateBuf, 100, 0)
+	encoder := hc.NewQpackEncoder(&updateBuf, 100, 100)
 	setupEncoder(t, encoder, &updateBuf)
 
 	// Block new table insertions for this key.

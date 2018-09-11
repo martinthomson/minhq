@@ -150,12 +150,13 @@ type QpackEncoder struct {
 // will be referenced, those outside will not be. Set `margin` to a value that
 // is less than capacity. Setting `margin` too low can cause churn, where the
 // encoder will duplicate entries rather than reference them.
-func NewQpackEncoder(hw io.Writer, capacity TableCapacity, margin TableCapacity) *QpackEncoder {
+func NewQpackEncoder(hw io.Writer, capacity TableCapacity, referenceable TableCapacity) *QpackEncoder {
 	encoder := new(QpackEncoder)
-	encoder.table = NewQpackEncoderTable(capacity, margin)
+	encoder.table = NewQpackEncoderTable(capacity, referenceable)
 	encoder.Table = encoder.table
 	encoder.updatesWriter = NewWriter(hw)
 	encoder.usage = make(map[uint64]*qpackStreamUsage)
+	encoder.initLogging(nil)
 	return encoder
 }
 
@@ -557,10 +558,17 @@ func (encoder *QpackEncoder) AcknowledgeReset(id uint64) error {
 
 // SetCapacity sets the table capacity. This panics if it is called when the
 // capacity has already been set to a non-zero value.
-func (encoder *QpackEncoder) SetCapacity(c TableCapacity) {
+func (encoder *QpackEncoder) SetCapacity(capacity TableCapacity) {
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
-	encoder.table.SetCapacity(c)
+	encoder.table.SetCapacity(capacity)
+}
+
+// SetReferenceableLimit limits the space in the table that can be used.
+func (encoder *QpackEncoder) SetReferenceableLimit(limit TableCapacity) {
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
+	encoder.table.SetReferenceableLimit(limit)
 }
 
 // SetMaxBlockedStreams sets the number of streams that this can encode without blocking.

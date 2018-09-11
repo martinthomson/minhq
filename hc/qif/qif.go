@@ -1,25 +1,34 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
+	"log"
 	"os"
 	"runtime"
+	"strconv"
+
+	"github.com/martinthomson/minhq/hc"
 )
 
+var logbuf bytes.Buffer
+
 func usage() {
-	msg := fmt.Sprintf("Usage: %s <cmd> [args]\n\n", os.Args[0])
-	msg += "Encode from a QIF file:\n"
-	msg += "    ... encode [-a] [in [out]]\n\n"
-	msg += "    -a    Treat every block as immediately acknowledged\n\n"
-	msg += "Decode from a QIF file:\n"
-	msg += "    ... decode [in [out]]\n\n"
-	os.Stderr.WriteString(msg)
+	msg := "Usage: %s <cmd> [args]\n\n" +
+		"Encode from a QIF file:\n" +
+		"    ... encode [-a] [-t size] [in [out]]\n\n" +
+		"    -a    Treat every block as immediately acknowledged\n\n" +
+		"Decode from a QIF file:\n" +
+		"    ... decode [in [out]]\n\n"
+	fmt.Fprintf(os.Stderr, msg, os.Args[0])
 	os.Exit(2)
 }
 
 func check(err error) {
 	if err != nil {
-		fmt.Printf("error: Invalid input %v\n", err)
+		fmt.Printf("error: %v\n", err)
+		fmt.Println(logbuf.String())
+
 		buf := make([]byte, 1<<16)
 		stackSize := runtime.Stack(buf, true)
 		fmt.Printf("%s\n", string(buf[0:stackSize]))
@@ -32,6 +41,8 @@ func main() {
 		usage()
 	}
 
+	logger := log.New(&logbuf, "", log.Lmicroseconds|log.Lshortfile)
+
 	args := os.Args[2:]
 	switch os.Args[1] {
 	case "encode":
@@ -39,6 +50,13 @@ func main() {
 		if len(args) >= 1 && args[0] == "-a" {
 			ack = true
 			args = args[1:]
+		}
+		tableSize := hc.TableCapacity(4096)
+		if len(args) >= 2 && args[0] == "-t" {
+			sz, err := strconv.Atoi(args[1])
+			check(err)
+			tableSize = hc.TableCapacity(sz)
+			args = args[2:]
 		}
 		var enc *encoder
 		switch len(args) {
@@ -51,7 +69,8 @@ func main() {
 		}
 		defer enc.Close()
 		enc.acknowledge = ack
-		enc.Encode()
+		enc.qpack.SetCapacity(tableSize)
+		enc.Encode(logger)
 
 	case "decode":
 		var dec *decoder
@@ -64,7 +83,7 @@ func main() {
 			dec = newDecoder(args[0], args[1])
 		}
 		defer dec.Close()
-		dec.Decode()
+		dec.Decode(logger)
 
 	default:
 		usage()

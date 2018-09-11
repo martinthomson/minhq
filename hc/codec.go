@@ -1,6 +1,11 @@
 package hc
 
-import "errors"
+import (
+	"errors"
+	"io"
+	"io/ioutil"
+	"log"
+)
 
 // ErrIndexError is a decoder error for the case where an invalid index is
 // received.
@@ -40,14 +45,31 @@ func validatePseudoHeaders(headers []HeaderField) error {
 	return nil
 }
 
+type logged struct {
+	logger *log.Logger
+}
+
+func (lg *logged) initLogging(w io.Writer) {
+	if w == nil {
+		w = ioutil.Discard
+	}
+	lg.logger = log.New(w, "", log.Lmicroseconds|log.Lshortfile)
+}
+
+func (lg *logged) SetLogger(logger *log.Logger) {
+	lg.logger = logger
+}
+
 type decoderCommon struct {
 	// Table is public to provide access to its methods.
 	Table Table
+	logged
 }
 
 type encoderCommon struct {
 	// Table is public to provide access to its methods.
 	Table Table
+	logged
 
 	// HuffmanPreference records preferences for Huffman coding of strings.
 	HuffmanPreference HuffmanCodingChoice
@@ -92,6 +114,7 @@ func (encoder encoderCommon) shouldIndex(h HeaderField) bool {
 // SetIndexPreference sets preferences for header fields with the given name.
 // Set to true to index, false to never index.
 func (encoder *encoderCommon) SetIndexPreference(name string, pref bool) {
+	encoder.logger.Printf("set indexing pref for %v to %v", name, pref)
 	if encoder.indexPrefs == nil {
 		encoder.indexPrefs = make(map[string]bool)
 	}
@@ -100,5 +123,6 @@ func (encoder *encoderCommon) SetIndexPreference(name string, pref bool) {
 
 // ClearIndexPreference resets the preference for indexing for the named header field.
 func (encoder *encoderCommon) ClearIndexPreference(name string) {
+	encoder.logger.Printf("clear indexing pref for %v", name)
 	delete(encoder.indexPrefs, name)
 }

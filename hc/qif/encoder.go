@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"os"
 
 	"github.com/martinthomson/minhq/hc"
@@ -69,7 +70,8 @@ func (enc *encoder) writeBlock(id uint64, block *bytes.Buffer) {
 	block.Reset()
 }
 
-func (enc *encoder) Encode() {
+func (enc *encoder) Encode(logger *log.Logger) {
+	enc.qpack.SetLogger(logger)
 	for {
 		block, err := enc.input.ReadHeaderBlock()
 		if err == io.EOF {
@@ -78,8 +80,9 @@ func (enc *encoder) Encode() {
 		check(err)
 
 		for _, h := range block {
-			os.Stderr.WriteString(h.String() + "\n")
+			logger.Printf("%v\n", h)
 		}
+		logger.Println()
 
 		enc.stream++
 		var headerStream bytes.Buffer

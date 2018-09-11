@@ -39,6 +39,7 @@ func NewQpackDecoder(aw io.WriteCloser, capacity TableCapacity) *QpackDecoder {
 	decoder.acknowledged = acknowledged
 	cancelled := make(chan uint64)
 	decoder.cancelled = cancelled
+	decoder.initLogging(nil)
 	go decoder.writeAcknowledgements(aw, available, acknowledged, cancelled)
 	return decoder
 }
@@ -65,20 +66,24 @@ func (decoder *QpackDecoder) writeAcknowledgements(aw io.WriteCloser, available 
 			remaining = 7
 			// Header Acknowledgment: instruction = b1
 			err = w.WriteBit(1)
+			decoder.logger.Printf("ack header block %v", v)
 
 		case cancel := <-cancelled:
 			v = cancel
 			remaining = 6
 			// Stream Cancellation: instruction = b01
 			err = w.WriteBits(1, 2)
+			decoder.logger.Printf("ack stream cancellation %v", v)
 
 		case entry, ok := <-available:
 			if !ok {
+				decoder.logger.Printf("ack closing")
 				return // The available channel closed.
 			}
 			if syncLargest < entry {
 				syncLargest = entry
 				if delayTss {
+					decoder.logger.Printf("defer table state synchronize")
 					delayTss = false
 					go func() {
 						<-time.After(decoder.ackDelay)
@@ -99,6 +104,7 @@ func (decoder *QpackDecoder) writeAcknowledgements(aw io.WriteCloser, available 
 			remaining = 6
 			// Table State Synchronize: instruction = b00
 			err = w.WriteBits(0, 2)
+			decoder.logger.Printf("table state synchronize %v", v)
 		}
 		if err != nil {
 			// TODO: close the connection instead of just disappearing
@@ -125,6 +131,7 @@ func (decoder *QpackDecoder) readValueAndInsert(reader *Reader, name string) err
 	if tableOverhead+TableCapacity(len(name)+len(value)) > decoder.Table.Capacity() {
 		return ErrTableOverflow
 	}
+	decoder.logger.Printf("insert %v = %v", name, value)
 	added := decoder.Table.Insert(name, value, nil)
 	decoder.available <- added.Base()
 	return nil
@@ -139,6 +146,7 @@ func (decoder *QpackDecoder) readInsertWithNameReference(reader *Reader, base in
 	if err != nil {
 		return err
 	}
+	decoder.logger.Printf("insert w/ name ref (static=%v) %v", static == 1, nameIndex)
 	var nameEntry Entry
 	if static != 0 {
 		nameEntry = decoder.table.GetStatic(nameIndex)
@@ -164,6 +172,7 @@ func (decoder *QpackDecoder) readDuplicate(reader *Reader, base int) error {
 	if err != nil {
 		return err
 	}
+	decoder.logger.Printf("duplicate %v", index)
 	entry := decoder.Table.GetDynamic(index, base)
 	if entry == nil {
 		return ErrIndexError
@@ -178,6 +187,7 @@ func (decoder *QpackDecoder) readDynamicUpdate(reader *Reader) error {
 	if err != nil {
 		return err
 	}
+	decoder.logger.Printf("update capacity %v", capacity)
 	decoder.Table.SetCapacity(TableCapacity(capacity))
 	return nil
 }
@@ -240,6 +250,7 @@ func (decoder *QpackDecoder) readIndexed(reader *Reader, base int) (*HeaderField
 	if err != nil {
 		return nil, err
 	}
+	decoder.logger.Printf("indexed (static=%v) %v", static == 1, index)
 	var entry Entry
 	if static == 1 {
 		entry = decoder.Table.GetStatic(index)
@@ -257,10 +268,12 @@ func (decoder *QpackDecoder) readPostBaseIndexed(reader *Reader, base int) (*Hea
 	if err != nil {
 		return nil, err
 	}
+	decoder.logger.Printf("post-base indexed %v", postBase)
 	entry := decoder.Table.GetDynamic(-1-postBase, base)
 	if entry == nil {
 		return nil, ErrIndexError
 	}
+	decoder.logger.Printf("entry %v", entry)
 	return &HeaderField{entry.Name(), entry.Value(), false}, nil
 }
 
@@ -277,6 +290,8 @@ func (decoder *QpackDecoder) readLiteralWithNameReference(reader *Reader, base i
 	if err != nil {
 		return nil, err
 	}
+	decoder.logger.Printf("literal name ref (sensitive=%v, static=%v) %v",
+		neverIndex == 1, static == 1, nameIndex)
 	var nameEntry Entry
 	if static == 1 {
 		nameEntry = decoder.Table.GetStatic(nameIndex)
@@ -303,6 +318,8 @@ func (decoder *QpackDecoder) readLiteralWithPostBaseNameReference(reader *Reader
 	if err != nil {
 		return nil, err
 	}
+	decoder.logger.Printf("literal name ref (sensitive=%v) %v",
+		neverIndex == 1, postBase)
 	nameEntry := decoder.Table.GetDynamic(-1*postBase, base)
 	if nameEntry == nil {
 		return nil, ErrIndexError
@@ -338,6 +355,8 @@ func (decoder *QpackDecoder) readBase(reader *Reader) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
+	decoder.logger.Printf("largest reference %v, current base %v",
+		largestReference, decoder.table.Base())
 	// This blocks until the dynamic table is ready.
 	decoder.table.WaitForEntry(largestReference)
 
@@ -352,8 +371,10 @@ func (decoder *QpackDecoder) readBase(reader *Reader) (int, int, error) {
 	if sign == 1 && delta == 0 {
 		return 0, 0, errors.New("invalid delta for base index")
 	}
+	decoder.logger.Printf("base delta %v %v", sign, delta)
 	// Sign: 1 means negative, 0 means positive.
-	base := largestReference + (delta * int(1-2*sign))
+	base := largestReference + (delta * (1 - 2*int(sign)))
+	decoder.logger.Printf("base %v", base)
 	return largestReference, base, nil
 }
 
@@ -366,6 +387,11 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 	}
 
 	headers := []HeaderField{}
+	addHeader := func(h *HeaderField) {
+		decoder.logger.Printf("add %v", h)
+		headers = append(headers, *h)
+	}
+
 	for {
 		b, err := reader.ReadBit()
 		if err == io.EOF {
@@ -379,7 +405,7 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 			if err != nil {
 				return nil, err
 			}
-			headers = append(headers, *h)
+			addHeader(h)
 			continue
 		}
 
@@ -392,7 +418,7 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 			if err != nil {
 				return nil, err
 			}
-			headers = append(headers, *h)
+			addHeader(h)
 			continue
 		}
 
@@ -405,7 +431,7 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 			if err != nil {
 				return nil, err
 			}
-			headers = append(headers, *h)
+			addHeader(h)
 			continue
 		}
 
@@ -422,7 +448,7 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 		if err != nil {
 			return nil, err
 		}
-		headers = append(headers, *h)
+		addHeader(h)
 	}
 
 	err = validatePseudoHeaders(headers)

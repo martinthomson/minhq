@@ -22,8 +22,8 @@ func NewConcatenatingReader() *ConcatenatingReader {
 	return &ConcatenatingReader{pending: make(chan *concatMessage)}
 }
 
-// Add adds a reader, then holds until it is fully drained.
-func (cat *ConcatenatingReader) Add(r io.Reader) {
+// AddReader adds a reader, then holds until it is fully drained.
+func (cat *ConcatenatingReader) AddReader(r io.Reader) {
 	message := &concatMessage{r, make(chan struct{})}
 	cat.pending <- message
 	<-message.drained

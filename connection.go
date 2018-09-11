@@ -235,7 +235,8 @@ func (c *connection) serviceUnidirectionalStreams(handler connectionHandler,
 			case unidirectionalStreamQpackDecoder:
 				err = c.encoder.ServiceAcknowledgments(s)
 			case unidirectionalStreamQpackEncoder:
-				err = c.decoder.ServiceUpdates(s)
+				err = c.decoder.ReadTableUpdates(s)
+				c.decoder.Close()
 			default:
 				err = handler.HandleUnidirectionalStream(t, s)
 			}

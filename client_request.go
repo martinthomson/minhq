@@ -117,7 +117,7 @@ func (req *ClientRequest) readResponse(s *stream, c *ClientConnection,
 		Request:         req,
 		IncomingMessage: newIncomingMessage(&s.recvStream, c.connection.decoder, nil),
 	}
-	err := resp.read(func(headers headerFieldArray) (bool, error) {
+	err := resp.handleMessage(func(headers headerFieldArray) (bool, error) {
 		resp.setHeaders(headers)
 		switch headers.GetStatus() / 100 {
 		case 0:

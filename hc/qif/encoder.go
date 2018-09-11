@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"os"
 
@@ -53,6 +54,11 @@ func newEncoder(inputName string, outputName string) *encoder {
 }
 
 func (enc *encoder) writeBlock(id uint64, block *bytes.Buffer) {
+	if block.Len() <= 0 {
+		return
+	}
+	os.Stderr.WriteString(fmt.Sprintf("%x [%d] %x\n", id, block.Len(), block.Bytes()))
+
 	check(enc.output.WriteBits(id, 64))
 	check(enc.output.WriteBits(uint64(block.Len()), 32))
 	n, err := io.Copy(enc.output, block)
@@ -60,6 +66,7 @@ func (enc *encoder) writeBlock(id uint64, block *bytes.Buffer) {
 	if n < int64(block.Len()) {
 		check(io.ErrShortWrite)
 	}
+	block.Reset()
 }
 
 func (enc *encoder) Encode() {
@@ -70,14 +77,15 @@ func (enc *encoder) Encode() {
 		}
 		check(err)
 
+		for _, h := range block {
+			os.Stderr.WriteString(h.String() + "\n")
+		}
+
 		enc.stream++
 		var headerStream bytes.Buffer
-		check(enc.qpack.WriteHeaderBlock(&enc.updateStream, enc.stream, block...))
+		check(enc.qpack.WriteHeaderBlock(&headerStream, enc.stream, block...))
 
-		if enc.updateStream.Len() > 0 {
-			enc.writeBlock(0, &enc.updateStream)
-			enc.updateStream.Reset()
-		}
+		enc.writeBlock(0, &enc.updateStream)
 		enc.writeBlock(enc.stream, &headerStream)
 
 		if enc.acknowledge {

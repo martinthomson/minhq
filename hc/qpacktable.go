@@ -15,9 +15,14 @@ type qpackTableCommon struct {
 	tableCommon
 }
 
+const useQpackStaticTable = true
+
 // Lookup finds an entry.
 func (table *qpackTableCommon) Lookup(name string, value string) (Entry, Entry) {
-	return table.lookupImpl(qpackStaticTable, name, value, 0, len(table.dynamic))
+	if useQpackStaticTable {
+		return table.lookupImpl(qpackStaticTable, name, value, 0, len(table.dynamic))
+	}
+	return table.lookupImpl(hpackStaticTable, name, value, 0, len(table.dynamic))
 }
 
 // Index returns the index for the given entry.
@@ -31,10 +36,19 @@ func (table *qpackTableCommon) Index(e Entry) int {
 
 // GetStatic returns the static table entry at the index i.
 func (table *qpackTableCommon) GetStatic(i int) Entry {
-	if i < 0 || i >= len(qpackStaticTable) {
+	if useQpackStaticTable {
+		if i < 0 || i >= len(qpackStaticTable) {
+			return nil
+		}
+		return qpackStaticTable[i]
+	}
+
+	// Use the HPACK table temporarily.
+	i-- // one-based indexing, gross.
+	if i < 0 || i >= len(hpackStaticTable) {
 		return nil
 	}
-	return qpackStaticTable[i]
+	return hpackStaticTable[i]
 }
 
 // QpackDecoderTable is a table for decoding QPACK header fields.
@@ -329,7 +343,10 @@ func (qt *QpackEncoderTable) LookupReferenceable(name string, value string, maxB
 	if end <= start {
 		end = start // i.e., don't search the dynamic table at all.
 	}
-	return qt.lookupImpl(qpackStaticTable, name, value, start, end)
+	if useQpackStaticTable {
+		return qt.lookupImpl(qpackStaticTable, name, value, start, end)
+	}
+	return qt.lookupImpl(hpackStaticTable, name, value, start, end)
 }
 
 // LookupBlocked looks in the portion of the table that we're blocked from looking at

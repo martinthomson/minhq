@@ -137,7 +137,12 @@ func newIncomingMessage(s *recvStream, decoder *hc.QpackDecoder, headers []hc.He
 	}
 }
 
-func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
+// Read means that this implements io.Reader.
+func (msg *IncomingMessage) Read(p []byte) (int, error) {
+	return msg.reader.Read(p)
+}
+
+func (msg *IncomingMessage) handleMessage(headersHandler initialHeadersHandler,
 	frameHandler incomingMessageFrameHandler) error {
 	defer close(msg.trailers)
 	defer msg.reader.Close()
@@ -162,7 +167,7 @@ func (msg *IncomingMessage) read(headersHandler initialHeadersHandler,
 				if !gotFirstHeaders {
 					return ErrInvalidFrame
 				}
-				msg.reader.Add(r)
+				msg.reader.AddReader(r)
 
 			case frameHeaders:
 				headers, err := msg.decoder.ReadHeaderBlock(r, msg.s.Id())

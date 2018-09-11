@@ -20,20 +20,7 @@ func checkExpectedUpdates(t *testing.T, updateBuf *bytes.Buffer, expectedHex str
 		assert.Equal(t, 0, updateBuf.Len())
 		return
 	}
-
-	// Remove and check the length that precedes the table updates.
-	intReader := hc.NewReader(updateBuf)
-	// Read the length.
-	length, err := intReader.ReadInt(8)
-	assert.Nil(t, err)
-	// Pull that many octets from the buffer.
-	contents := updateBuf.Next(int(length))
-	assert.Equal(t, int(length), len(contents))
-	// Check that there is no remaining data.
-	_, err = updateBuf.ReadByte()
-	assert.Equal(t, err, io.EOF)
-	// Finally, check that the octets are correct.
-	assert.Equal(t, expectedUpdates, contents)
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 }
 
 func TestQpackEncoder(t *testing.T) {
@@ -75,14 +62,15 @@ func TestQpackEncoder(t *testing.T) {
 		t.Logf("Expected:     %v", tc.qpackHeader)
 
 		checkExpectedUpdates(t, &updateBuf, tc.qpackUpdates)
+		assert.Equal(t, encoder.Table.Base(), tc.qpackTable.base)
 
 		expectedHeader, err := hex.DecodeString(tc.qpackHeader)
 		assert.Nil(t, err)
 		assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
 		var dynamicTable = &tc.hpackTable
-		if tc.qpackTable != nil {
-			dynamicTable = tc.qpackTable
+		if tc.qpackTable.entries != nil {
+			dynamicTable = tc.qpackTable.entries
 		}
 		checkDynamicTable(t, encoder.Table, dynamicTable)
 	}
@@ -104,7 +92,7 @@ func setupEncoder(t *testing.T, encoder *hc.QpackEncoder, updateBuf *bytes.Buffe
 	t.Logf("Setup Table: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	// We should see inserts here.
-	expectedUpdate, err := hex.DecodeString("1664a874943f85ee3a2d287f64a874945f85ee3a2d28bf")
+	expectedUpdate, err := hex.DecodeString("64a874943f85ee3a2d287f64a874945f85ee3a2d28bf")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdate, updateBuf.Bytes())
 	// And two references.
@@ -156,7 +144,7 @@ func TestQpackDuplicate(t *testing.T) {
 	t.Logf("Force Duplicate: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	// This should include a duplication (that's the 02 on the end).
-	expectedUpdates, err := hex.DecodeString("0c64a874941f85ee3a2d283f02")
+	expectedUpdates, err := hex.DecodeString("64a874941f85ee3a2d283f02")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
@@ -188,7 +176,7 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 
 	// name0:value0 can be added, but there isn't enough room to duplicate
 	// name1:value1, so it uses a literal.
-	expectedUpdates, err := hex.DecodeString("0b64a874941f85ee3a2d283f")
+	expectedUpdates, err := hex.DecodeString("64a874941f85ee3a2d283f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
@@ -243,7 +231,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	assert.Nil(t, err)
 	t.Logf("Unblocked: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
-	expectedUpdates, err := hex.DecodeString("0b64a874959f85ee3a2d2b3f")
+	expectedUpdates, err := hex.DecodeString("64a874959f85ee3a2d2b3f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 	expectedHeader, err = hex.DecodeString("03008280")
@@ -266,7 +254,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	assert.Nil(t, err)
 	t.Logf("Same stream: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
-	expectedUpdates, err = hex.DecodeString("0b64a87495af85ee3a2d2b5f")
+	expectedUpdates, err = hex.DecodeString("64a87495af85ee3a2d2b5f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 	expectedHeader, err = hex.DecodeString("04008180")
@@ -318,7 +306,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	assert.Nil(t, err)
 	t.Logf("After Cancel: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
-	expectedUpdates, err = hex.DecodeString("1664a87495bf85ee3a2d2b7f64a87495cf85ee3a2d2b9f")
+	expectedUpdates, err = hex.DecodeString("64a87495bf85ee3a2d2b7f64a87495cf85ee3a2d2b9f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 	expectedHeader, err = hex.DecodeString("0600828180")
@@ -347,7 +335,7 @@ func TestQpackNameReference(t *testing.T) {
 	t.Logf("Name Reference: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	// 81 is an insert with a name reference.
-	expectedUpdates, err := hex.DecodeString("078185ee3a2d2bff")
+	expectedUpdates, err := hex.DecodeString("8185ee3a2d2bff")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
@@ -393,36 +381,159 @@ func TestNotIndexedNameReference(t *testing.T) {
 	assertQpackTableFull(t, encoder, &updateBuf)
 }
 
-func checkAck(t *testing.T, ackReader *hc.Reader, eb byte, ev uint64) {
-	c := byte(1)
-	if eb > 1 {
-		c = 2
+type ackCheckType byte
+
+const (
+	ackCheckTss            = ackCheckType(iota)
+	ackCheckHeaderBlockAck = ackCheckType(iota)
+	ackCheckDone           = ackCheckType(iota)
+)
+
+// ackCheckerMsg is used by ackChecker (below), internally
+type ackCheckerMsg struct {
+	t    ackCheckType
+	v    uint64
+	done chan struct{}
+}
+
+// ackChecker checks acknowledgements on a separate goroutine.
+// This is necessary because a single operation might generate multiple
+// acknowledgments and we don't want that operation to block.  This isn't
+// a problem if the acknowledgements are being written to a socket, but
+// using io.Pipe as this does, writing will block until the acknowledgment
+// is read.  That causes the test to back up, so this sets up to expect
+// certain acknowledgments (with ExpectTss and ExpectHeaderBlockAck) and
+// it reads proactively.
+type ackChecker struct {
+	t *testing.T
+	io.Writer
+	r *hc.Reader
+
+	cond         *sync.Cond
+	headerBlocks map[uint64]bool
+	base         int
+
+	done chan struct{}
+}
+
+func newAckChecker(t *testing.T) *ackChecker {
+	r, w := io.Pipe()
+	ac := &ackChecker{
+		t:            t,
+		Writer:       w,
+		r:            hc.NewReader(r),
+		cond:         sync.NewCond(&sync.Mutex{}),
+		headerBlocks: make(map[uint64]bool),
+		base:         0,
+		done:         make(chan struct{}),
 	}
-	v, err := ackReader.ReadBits(c)
-	assert.Nil(t, err)
-	assert.Equal(t, byte(v), eb)
-	v, err = ackReader.ReadInt(8 - c)
-	assert.Equal(t, v, ev)
+	go ac.read()
+	return ac
+}
+
+func (ac *ackChecker) readHeaderBlock() {
+	token, err := ac.r.ReadInt(7)
+	assert.Nil(ac.t, err)
+
+	ac.cond.L.Lock()
+	defer ac.cond.L.Unlock()
+	ac.headerBlocks[token] = true
+	ac.cond.Broadcast()
+}
+
+func (ac *ackChecker) readTableStateSync() {
+	b, err := ac.r.ReadBit()
+	assert.Nil(ac.t, err)
+	// 0b00 == Table State Synchronize and we support nothing else.
+	assert.Equal(ac.t, byte(0), b)
+
+	incr, err := ac.r.ReadInt(6)
+	assert.Nil(ac.t, err)
+
+	ac.cond.L.Lock()
+	defer ac.cond.L.Unlock()
+	ac.base += int(incr)
+	ac.cond.Broadcast()
+}
+
+func (ac *ackChecker) isDone() bool {
+	select {
+	case <-ac.done:
+		return true
+	default:
+		return false
+	}
+}
+
+func (ac *ackChecker) read() {
+	for !ac.isDone() {
+		b, err := ac.r.ReadBit()
+		assert.Nil(ac.t, err)
+		if b == 1 {
+			ac.readHeaderBlock()
+		} else {
+			ac.readTableStateSync()
+		}
+	}
+}
+
+func (ac *ackChecker) Close() error {
+	close(ac.done)
+	return nil
+}
+
+// wait wraps the condition variable Wait() function
+// and checks that this is still running.
+func (ac *ackChecker) wait() {
+	if ac.isDone() {
+		assert.True(ac.t, false, "stopped")
+	}
+	ac.cond.Wait()
+}
+
+// WaitForBase blocks until acknowledgments for the table increment to |base|.
+func (ac *ackChecker) WaitForBase(base int) {
+	ac.cond.L.Lock()
+	defer ac.cond.L.Unlock()
+	for ac.base < base {
+		ac.wait()
+	}
+}
+
+// WaitForHeaderBlock blocks until the given header block is acknowledged.
+// If the header block doesn't need acknowledgment, exit early.
+func (ac *ackChecker) WaitForHeaderBlock(token uint64, encoded []byte) {
+	if !ac.needsAcknowledgment(encoded) {
+		return
+	}
+	ac.cond.L.Lock()
+	defer ac.cond.L.Unlock()
+	for !ac.headerBlocks[token] {
+		ac.wait()
+	}
 }
 
 // needsAcknowledgment returns true of the largest reference is greater than 0.
 // We only need to check first octet of the encoded header block to learn this.
-func needsAcknowledgment(encoded []byte) bool {
+func (ac *ackChecker) needsAcknowledgment(encoded []byte) bool {
 	return encoded[0] > 0
 }
 
 func TestQpackDecoderOrdered(t *testing.T) {
-	var ackReader *hc.Reader
+	var ackChecker *ackChecker
 	var decoder *hc.QpackDecoder
-	tableEntries := 0
 	var token uint64
+
 	for _, tc := range testCases {
 		if tc.resetTable {
 			t.Log("Reset table")
-			reader, writer := io.Pipe()
-			ackReader = hc.NewReader(reader)
-			decoder = hc.NewQpackDecoder(writer, 256)
-			tableEntries = 0
+			if decoder != nil {
+				// The ackChecker gets closed by the decoder.
+				decoder.Close()
+			}
+
+			ackChecker = newAckChecker(t)
+			decoder = hc.NewQpackDecoder(ackChecker, 256)
 		}
 		t.Logf("Decode:")
 		for _, h := range tc.headers {
@@ -431,47 +542,43 @@ func TestQpackDecoderOrdered(t *testing.T) {
 
 		if len(tc.qpackUpdates) > 0 {
 			t.Logf("Control: %v", tc.qpackUpdates)
+
 			control, err := hex.DecodeString(tc.qpackUpdates)
 			assert.Nil(t, err)
 			err = decoder.ReadTableUpdates(bytes.NewReader(control))
 			assert.Nil(t, err)
+
+			assert.Equal(t, tc.qpackTable.base, decoder.Table.Base())
+			ackChecker.WaitForBase(tc.qpackTable.base)
 		}
 
 		var dynamicTable = &tc.hpackTable
-		if tc.qpackTable != nil {
-			dynamicTable = tc.qpackTable
+		if tc.qpackTable.entries != nil {
+			dynamicTable = tc.qpackTable.entries
 		}
 		checkDynamicTable(t, decoder.Table, dynamicTable)
-
-		// There were new entries.  Check that they were acknowledged.
-		if decoder.Table.Base() > tableEntries {
-			// 0 is the 2-bit instruction for a table state synchronize.
-			checkAck(t, ackReader, 0, uint64(decoder.Table.Base()-tableEntries))
-			tableEntries = decoder.Table.Base()
-		}
 
 		t.Logf("Header: %v", tc.qpackHeader)
 		encoded, err := hex.DecodeString(tc.qpackHeader)
 		assert.Nil(t, err)
 		headers, err := decoder.ReadHeaderBlock(bytes.NewReader(encoded), token)
 		assert.Nil(t, err)
-		if needsAcknowledgment(encoded) {
-			// 0 is the 1-bit instruction for a header block ack.
-			checkAck(t, ackReader, 1, token)
-		}
-
 		assert.Equal(t, tc.headers, headers)
+		ackChecker.WaitForHeaderBlock(token, encoded)
+
 		token++
 	}
+	decoder.Close()
 }
 
+// notifyingReader provides a signal when the first octet is read.
 type notifyingReader struct {
 	reader io.Reader
 	signal *sync.Cond
 	done   chan struct{}
 }
 
-func NewNotifyingReader(p []byte) *notifyingReader {
+func newNotifyingReader(p []byte) *notifyingReader {
 	return &notifyingReader{bytes.NewReader(p),
 		sync.NewCond(&sync.Mutex{}), make(chan struct{})}
 }
@@ -507,37 +614,32 @@ func (nr *notifyingReader) Wait() {
 // encoder has *not* received acknowledgments for header blocks as it produces
 // the encoded data.
 func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
+	var ackChecker *ackChecker
 	var decoder *hc.QpackDecoder
 	var controlWriter io.WriteCloser
 	var controlReader io.Reader
 	controlDone := make(chan struct{})
 	headerDone := new(sync.WaitGroup)
 
-	tmpAckReader, decoderWriter := io.Pipe()
-	ackReader := hc.NewReader(tmpAckReader)
-	expectedAcks := make(chan uint64)
-	go func() {
-		// This test delays Table State Synchronize and doesn't reset streams, so only
-		// header block acknowledgements are necessary.
-		for ack := range expectedAcks {
-			checkAck(t, ackReader, 1, ack)
-		}
-	}()
-
 	cleanup := func() {
-		controlWriter.Close()
-		<-controlDone
+		// Wait for headers to be done, so that acknowledgements are read.
+		// If you don't wait before closing, the decoder will choke.
 		if batchRead {
 			headerDone.Wait()
 		}
+		decoder.Close() // This closes the ackChecker
+		controlWriter.Close()
+		<-controlDone
 	}
 
 	for i, tc := range testData {
+		// The first test always sets resetTable to true.
 		if tc.resetTable {
-			if controlReader != nil {
+			if decoder != nil {
 				cleanup()
 			}
-			decoder = hc.NewQpackDecoder(decoderWriter, 256)
+			ackChecker = newAckChecker(t)
+			decoder = hc.NewQpackDecoder(ackChecker, 256)
 			decoder.SetAckDelay(time.Second)
 			controlReader, controlWriter = io.Pipe()
 			go func() {
@@ -550,23 +652,22 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 		headerDone.Add(1)
 		headerBytes, err := hex.DecodeString(tc.qpackHeader)
 		assert.Nil(t, err)
-		nr := NewNotifyingReader(headerBytes)
+		nr := newNotifyingReader(headerBytes)
 
 		go func(i uint64, tc testCase, r io.Reader) {
 			defer headerDone.Done()
 			headers, err := decoder.ReadHeaderBlock(r, i)
 			assert.Nil(t, err)
-			if needsAcknowledgment(headerBytes) {
-				expectedAcks <- i
-			}
-
+			ackChecker.WaitForHeaderBlock(i, headerBytes)
 			assert.Equal(t, tc.headers, headers)
 		}(uint64(i), tc, nr)
 
-		// After setting up the header block to decode, feed the control stream to the
-		// reader.  First, wait for the header block reader to take a byte.
+		// After setting up the header block to decode, dispense table updates.
 		if len(tc.qpackUpdates) > 0 {
+			// Wait for the header block reader to take a byte before giving out any
+			// table updates.
 			nr.Wait()
+
 			controlBytes, err := hex.DecodeString(tc.qpackUpdates)
 			assert.Nil(t, err)
 			n, err := controlWriter.Write(controlBytes)
@@ -578,7 +679,6 @@ func testQpackDecoderAsync(t *testing.T, batchRead bool, testData []testCase) {
 		}
 	}
 	cleanup()
-	close(expectedAcks)
 }
 
 // This uses the default arrangement, so that table updates appear immediately
@@ -647,8 +747,9 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 // TestSingleRecordOverflow inserts into a table that is too small for
 // even a single record to fit.
 func TestSingleRecordOverflow(t *testing.T) {
-	var ackBuf bytes.Buffer
-	decoder := hc.NewQpackDecoder(&ackBuf, 20)
+	ackChecker := newAckChecker(t)
+	decoder := hc.NewQpackDecoder(ackChecker, 20)
+	defer decoder.Close()
 	updates, err := hex.DecodeString("64a874943f85ee3a2d287f")
 	assert.Nil(t, err)
 	err = decoder.ReadTableUpdates(bytes.NewReader(updates))

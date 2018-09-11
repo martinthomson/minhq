@@ -25,6 +25,11 @@ func checkDynamicTable(t *testing.T, table hc.Table, ts *[]dynamicTableEntry) {
 	assert.Equal(t, size, table.Used())
 }
 
+type qpackTableState struct {
+	base    int
+	entries *[]dynamicTableEntry
+}
+
 type testCase struct {
 	resetTable   bool
 	headers      []hc.HeaderField
@@ -33,7 +38,7 @@ type testCase struct {
 	hpackTable   []dynamicTableEntry
 	qpackUpdates string
 	qpackHeader  string
-	qpackTable   *[]dynamicTableEntry
+	qpackTable   qpackTableState
 }
 
 var testCases = []testCase{
@@ -49,6 +54,7 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "4a637573746f6d2d6b65790d637573746f6d2d686561646572",
 		qpackHeader:  "010080",
+		qpackTable:   qpackTableState{base: 1},
 	},
 	{
 		resetTable: true,
@@ -60,6 +66,7 @@ var testCases = []testCase{
 		hpackTable:   nil,
 		qpackUpdates: "",
 		qpackHeader:  "0000500c2f73616d706c652f70617468",
+		qpackTable:   qpackTableState{base: 0},
 	},
 	{
 		resetTable: true,
@@ -71,6 +78,7 @@ var testCases = []testCase{
 		hpackTable:   nil,
 		qpackUpdates: "",
 		qpackHeader:  "0000370170617373776f726406736563726574",
+		qpackTable:   qpackTableState{base: 0},
 	},
 	{
 		resetTable: true,
@@ -82,6 +90,7 @@ var testCases = []testCase{
 		hpackTable:   nil,
 		qpackUpdates: "",
 		qpackHeader:  "0000d8",
+		qpackTable:   qpackTableState{base: 0},
 	},
 	{
 		resetTable: true,
@@ -98,6 +107,7 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "c50f7777772e6578616d706c652e636f6d",
 		qpackHeader:  "0100d8d4c080",
+		qpackTable:   qpackTableState{base: 1},
 	},
 	{
 		resetTable: false,
@@ -116,8 +126,11 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "",
 		qpackHeader:  "0100d8d4c080f2",
-		qpackTable: &[]dynamicTableEntry{
-			{":authority", "www.example.com"},
+		qpackTable: qpackTableState{
+			base: 1,
+			entries: &[]dynamicTableEntry{
+				{":authority", "www.example.com"},
+			},
 		},
 	},
 	{
@@ -138,9 +151,12 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "4a637573746f6d2d6b65790c637573746f6d2d76616c7565",
 		qpackHeader:  "0200d8d3d78180",
-		qpackTable: &[]dynamicTableEntry{
-			{"custom-key", "custom-value"},
-			{":authority", "www.example.com"},
+		qpackTable: qpackTableState{
+			base: 2,
+			entries: &[]dynamicTableEntry{
+				{"custom-key", "custom-value"},
+				{":authority", "www.example.com"},
+			},
 		},
 	},
 	{
@@ -158,6 +174,7 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "c58cf1e3c2e5f23a6ba0ab90f4ff",
 		qpackHeader:  "0100d8d4c080",
+		qpackTable:   qpackTableState{base: 1},
 	},
 	{
 		resetTable: false,
@@ -176,8 +193,10 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "",
 		qpackHeader:  "0100d8d4c080f2",
-		qpackTable: &[]dynamicTableEntry{
-			{":authority", "www.example.com"},
+		qpackTable: qpackTableState{base: 1,
+			entries: &[]dynamicTableEntry{
+				{":authority", "www.example.com"},
+			},
 		},
 	},
 	{
@@ -198,9 +217,11 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "6825a849e95ba97d7f8925a849e95bb8e8b4bf",
 		qpackHeader:  "0200d8d3d78180",
-		qpackTable: &[]dynamicTableEntry{
-			{"custom-key", "custom-value"},
-			{":authority", "www.example.com"},
+		qpackTable: qpackTableState{base: 2,
+			entries: &[]dynamicTableEntry{
+				{"custom-key", "custom-value"},
+				{":authority", "www.example.com"},
+			},
 		},
 	},
 	{
@@ -224,11 +245,12 @@ var testCases = []testCase{
 		qpackUpdates: "f10770726976617465c31d4d6f6e2c203231204f6374203230313320" +
 			"32303a31333a323120474d54c91768747470733a2f2f7777772e6578616d706c652e636f6d",
 		qpackHeader: "0300ff07828180",
-		qpackTable: &[]dynamicTableEntry{
-			{"location", "https://www.example.com"},
-			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
-			{"cache-control", "private"},
-		},
+		qpackTable: qpackTableState{base: 3,
+			entries: &[]dynamicTableEntry{
+				{"location", "https://www.example.com"},
+				{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{"cache-control", "private"},
+			}},
 	},
 	{
 		resetTable: false,
@@ -248,6 +270,7 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "d503333037",
 		qpackHeader:  "040080838281",
+		qpackTable:   qpackTableState{base: 4},
 	},
 	{
 		resetTable: false,
@@ -275,11 +298,13 @@ var testCases = []testCase{
 		qpackHeader: "0300d582531d4d6f6e2c203231204f637420323031332032303a31333a" +
 			"323220474d5480ff0f5d38666f6f3d4153444a4b48514b425a584f5157454f50495" +
 			"541585157454f49553b206d61782d6167653d333630303b2076657273696f6e3d31",
-		qpackTable: &[]dynamicTableEntry{
-			{":status", "307"},
-			{"location", "https://www.example.com"},
-			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
-			{"cache-control", "private"},
+		qpackTable: qpackTableState{base: 4,
+			entries: &[]dynamicTableEntry{
+				{":status", "307"},
+				{"location", "https://www.example.com"},
+				{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{"cache-control", "private"},
+			},
 		},
 	},
 	{
@@ -302,10 +327,12 @@ var testCases = []testCase{
 		qpackUpdates: "f185aec3771a4bc396d07abe941054d444a8200595040b8166e082a6" +
 			"2d1bffc9919d29ad171863c78f0b97c8e9ae82ae43d3",
 		qpackHeader: "0300ff07828180",
-		qpackTable: &[]dynamicTableEntry{
-			{"location", "https://www.example.com"},
-			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
-			{"cache-control", "private"},
+		qpackTable: qpackTableState{base: 3,
+			entries: &[]dynamicTableEntry{
+				{"location", "https://www.example.com"},
+				{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{"cache-control", "private"},
+			},
 		},
 	},
 	{
@@ -326,6 +353,7 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "d583640eff",
 		qpackHeader:  "040080838281",
+		qpackTable:   qpackTableState{base: 4},
 	},
 	{
 		resetTable: false,
@@ -351,11 +379,13 @@ var testCases = []testCase{
 		qpackUpdates: "",
 		qpackHeader: "0300" + "d5" + "82" + "5396d07abe941054d444a8200595040b8166e084a62d1bff" +
 			"80" + "ff0f" + "5dad94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1" + "ab270fb5291f9587316065c003ed4ee5b1063d5007",
-		qpackTable: &[]dynamicTableEntry{
-			{":status", "307"},
-			{"location", "https://www.example.com"},
-			{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
-			{"cache-control", "private"},
+		qpackTable: qpackTableState{base: 4,
+			entries: &[]dynamicTableEntry{
+				{":status", "307"},
+				{"location", "https://www.example.com"},
+				{"date", "Mon, 21 Oct 2013 20:13:21 GMT"},
+				{"cache-control", "private"},
+			},
 		},
 	},
 	// Using existing values in the dynamic table revealed a bug in QPACK.
@@ -374,8 +404,10 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "c396d07abe941054d444a8200595040b8166e084a62d1bff",
 		qpackHeader:  "0100d580ff0f",
-		qpackTable: &[]dynamicTableEntry{
-			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+		qpackTable: qpackTableState{base: 1,
+			entries: &[]dynamicTableEntry{
+				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+			},
 		},
 	},
 	{
@@ -393,8 +425,10 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "",
 		qpackHeader:  "0100d580ff0f",
-		qpackTable: &[]dynamicTableEntry{
-			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+		qpackTable: qpackTableState{base: 1,
+			entries: &[]dynamicTableEntry{
+				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
+			},
 		},
 	},
 }

@@ -27,6 +27,11 @@ func (devnull *devnull) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// Close does nothing.
+func (devnull *devnull) Close() error {
+	return nil
+}
+
 func newDecoder(inputName string, outputName string) *decoder {
 	dec := new(decoder)
 
@@ -59,9 +64,11 @@ func newDecoder(inputName string, outputName string) *decoder {
 
 func (dec *decoder) readBlock() (uint64, io.Reader, error) {
 	stream, err := dec.input.ReadBits(64)
+	if err == io.EOF {
+		return 0, nil, err
+	}
 	check(err)
 	length, err := dec.input.ReadBits(32)
-	fmt.Println(length)
 	check(err)
 	return stream, &io.LimitedReader{R: dec.input, N: int64(length)}, nil
 }
@@ -76,12 +83,16 @@ func (dec *decoder) writeBlock(block []hc.HeaderField) {
 }
 
 func (dec *decoder) Decode() {
+	// Setup the update stream.
 	updateStream := hqio.NewConcatenatingReader()
-	go dec.qpack.ReadTableUpdates(updateStream)
+	go func() {
+		check(dec.qpack.ReadTableUpdates(updateStream))
+	}()
+
 	for {
 		stream, reader, err := dec.readBlock()
 		if err == io.EOF {
-			return
+			return // Done!
 		}
 		check(err)
 
@@ -93,7 +104,7 @@ func (dec *decoder) Decode() {
 		reader = &blockBytes
 
 		if stream == 0 {
-			updateStream.Add(reader)
+			updateStream.AddReader(reader)
 		} else {
 			headers, err := dec.qpack.ReadHeaderBlock(reader, stream)
 			check(err)

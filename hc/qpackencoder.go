@@ -1,7 +1,6 @@
 package hc
 
 import (
-	"bytes"
 	"io"
 	"strings"
 	"sync"
@@ -198,19 +197,19 @@ func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) error {
 }
 
 // writeDuplicate duplicates the indicated entry.
-func (encoder *QpackEncoder) writeDuplicate(w *Writer, entry DynamicEntry, state *qpackWriterState, i int) error {
+func (encoder *QpackEncoder) writeDuplicate(entry DynamicEntry, state *qpackWriterState, i int) error {
 	inserted := encoder.Table.Insert(entry.Name(), entry.Value(), state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
 		return nil
 	}
 
-	err := w.WriteBits(0, 3)
+	err := encoder.updatesWriter.WriteBits(0, 3)
 	if err != nil {
 		return err
 	}
 	// Note: subtract 1 from the index to account for the insertion above.
-	err = w.WriteInt(uint64(encoder.Table.Index(entry)-1), 5)
+	err = encoder.updatesWriter.WriteInt(uint64(encoder.Table.Index(entry)-1), 5)
 	if err != nil {
 		return err
 	}
@@ -220,7 +219,7 @@ func (encoder *QpackEncoder) writeDuplicate(w *Writer, entry DynamicEntry, state
 
 // writeInsert writes the entry at state.xxx[i] to the control stream.
 // Note that only nameMatch is used for this insertion.
-func (encoder *QpackEncoder) writeInsert(w *Writer, state *qpackWriterState, i int,
+func (encoder *QpackEncoder) writeInsert(state *qpackWriterState, i int,
 	nameMatch Entry) error {
 	h := state.headers[i]
 	inserted := encoder.Table.Insert(h.Name, h.Value, state)
@@ -240,6 +239,7 @@ func (encoder *QpackEncoder) writeInsert(w *Writer, state *qpackWriterState, i i
 	} else {
 		instruction = 1
 	}
+	w := encoder.updatesWriter
 	err := w.WriteBits(instruction, 2)
 	if err != nil {
 		return err
@@ -271,10 +271,6 @@ func (encoder *QpackEncoder) writeInsert(w *Writer, state *qpackWriterState, i i
 // writeTableChanges writes out the changes to the header table. It returns the
 // largest value of base that can be used for this to work.
 func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint64) error {
-	// We have to buffer everything here.
-	var buf bytes.Buffer
-	w := NewWriter(&buf)
-
 	// Only one goroutine can update the table at once.
 	defer encoder.mutex.Unlock()
 	encoder.mutex.Lock()
@@ -330,7 +326,7 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint6
 			// Only duplicate acknowledged entries.  Refreshing entries more than
 			// once per round trip is going to churn the table too much.
 			if duplicate.Base() <= encoder.highestAcknowledged {
-				err := encoder.writeDuplicate(w, duplicate, state, i)
+				err := encoder.writeDuplicate(duplicate, state, i)
 				if err != nil {
 					return err
 				}
@@ -346,7 +342,7 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint6
 			insertNameMatch = nameMatch
 		}
 		if encoder.shouldIndex(h) && h.size() <= encoder.Table.Capacity() {
-			err := encoder.writeInsert(w, state, i, insertNameMatch)
+			err := encoder.writeInsert(state, i, insertNameMatch)
 			if err != nil {
 				return err
 			}
@@ -356,17 +352,6 @@ func (encoder *QpackEncoder) writeTableChanges(state *qpackWriterState, id uint6
 	if state.isNewlyBlocked(encoder.highestAcknowledged) {
 		// If this wasn't blocking before, it is now.
 		encoder.blockedStreams++
-	}
-
-	if buf.Len() > 0 {
-		err := encoder.updatesWriter.WriteInt(uint64(buf.Len()), 8)
-		if err != nil {
-			return err
-		}
-		_, err = io.Copy(encoder.updatesWriter, &buf)
-		if err != nil {
-			return err
-		}
 	}
 
 	state.recordUsage(streamUsage)

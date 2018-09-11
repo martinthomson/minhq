@@ -29,7 +29,7 @@ type QpackDecoder struct {
 }
 
 // NewQpackDecoder makes and sets up a QpackDecoder.
-func NewQpackDecoder(aw io.Writer, capacity TableCapacity) *QpackDecoder {
+func NewQpackDecoder(aw io.WriteCloser, capacity TableCapacity) *QpackDecoder {
 	decoder := new(QpackDecoder)
 	decoder.table = NewQpackDecoderTable(capacity)
 	decoder.Table = decoder.table
@@ -43,8 +43,9 @@ func NewQpackDecoder(aw io.Writer, capacity TableCapacity) *QpackDecoder {
 	return decoder
 }
 
-func (decoder *QpackDecoder) writeAcknowledgements(aw io.Writer, available <-chan int,
+func (decoder *QpackDecoder) writeAcknowledgements(aw io.WriteCloser, available <-chan int,
 	acknowledged <-chan *headerBlockAck, cancelled <-chan uint64) {
+	defer aw.Close()
 	w := NewWriter(aw)
 
 	// These values are used to track whether to send Table State Synchronize, which we do on a delayed timer.
@@ -71,7 +72,10 @@ func (decoder *QpackDecoder) writeAcknowledgements(aw io.Writer, available <-cha
 			// Stream Cancellation: instruction = b01
 			err = w.WriteBits(1, 2)
 
-		case entry := <-available:
+		case entry, ok := <-available:
+			if !ok {
+				return // The available channel closed.
+			}
 			if syncLargest < entry {
 				syncLargest = entry
 				if delayTss {
@@ -113,22 +117,6 @@ func (decoder *QpackDecoder) SetAckDelay(delay time.Duration) {
 	decoder.ackDelay = delay
 }
 
-// ServiceUpdates reads from the given reader, updating the header table as needed.
-func (decoder *QpackDecoder) ServiceUpdates(hr io.Reader) error {
-	r := NewReader(hr)
-	for {
-		blockLen, err := r.ReadInt(8)
-		if err != nil {
-			return err
-		}
-		block := &io.LimitedReader{R: r, N: int64(blockLen)}
-		err = decoder.ReadTableUpdates(block)
-		if err != nil {
-			return err
-		}
-	}
-}
-
 func (decoder *QpackDecoder) readValueAndInsert(reader *Reader, name string) error {
 	value, err := reader.ReadString(7)
 	if err != nil {
@@ -137,7 +125,8 @@ func (decoder *QpackDecoder) readValueAndInsert(reader *Reader, name string) err
 	if tableOverhead+TableCapacity(len(name)+len(value)) > decoder.Table.Capacity() {
 		return ErrTableOverflow
 	}
-	decoder.Table.Insert(name, value, nil)
+	added := decoder.Table.Insert(name, value, nil)
+	decoder.available <- added.Base()
 	return nil
 }
 
@@ -179,7 +168,8 @@ func (decoder *QpackDecoder) readDuplicate(reader *Reader, base int) error {
 	if entry == nil {
 		return ErrIndexError
 	}
-	decoder.table.Insert(entry.Name(), entry.Value(), nil)
+	added := decoder.table.Insert(entry.Name(), entry.Value(), nil)
+	decoder.available <- added.Base()
 	return nil
 }
 
@@ -201,7 +191,6 @@ func (decoder *QpackDecoder) ReadTableUpdates(r io.Reader) error {
 		base := decoder.Table.Base()
 		b, err := reader.ReadBit()
 		if err == io.EOF {
-			decoder.available <- base
 			break // Success
 		}
 		if err != nil {
@@ -451,4 +440,11 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 // to release any references that might not have been acknowledged.
 func (decoder *QpackDecoder) Cancelled(id uint64) {
 	decoder.cancelled <- id
+}
+
+// Close tells the decoder to stop.  Mostly this is so it can stop providing
+// acknowledgments.
+func (decoder *QpackDecoder) Close() error {
+	close(decoder.available)
+	return nil
 }

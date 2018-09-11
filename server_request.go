@@ -45,7 +45,7 @@ func (req *ServerRequest) Target() *url.URL {
 }
 
 func (req *ServerRequest) handle(requests chan<- *ServerRequest) {
-	err := req.read(func(headers headerFieldArray) (bool, error) {
+	err := req.handleMessage(func(headers headerFieldArray) (bool, error) {
 		req.setHeaders(headers)
 		requests <- req
 		return true, nil

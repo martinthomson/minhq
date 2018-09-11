@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 	"log"
 	"os"
@@ -54,11 +53,11 @@ func newEncoder(inputName string, outputName string) *encoder {
 	return enc
 }
 
-func (enc *encoder) writeBlock(id uint64, block *bytes.Buffer) {
+func (enc *encoder) writeBlock(logger *log.Logger, id uint64, block *bytes.Buffer) {
 	if block.Len() <= 0 {
 		return
 	}
-	os.Stderr.WriteString(fmt.Sprintf("%x [%d] %x\n", id, block.Len(), block.Bytes()))
+	logger.Printf("%x [%d] %x\n", id, block.Len(), block.Bytes())
 
 	check(enc.output.WriteBits(id, 64))
 	check(enc.output.WriteBits(uint64(block.Len()), 32))
@@ -88,8 +87,8 @@ func (enc *encoder) Encode(logger *log.Logger) {
 		var headerStream bytes.Buffer
 		check(enc.qpack.WriteHeaderBlock(&headerStream, enc.stream, block...))
 
-		enc.writeBlock(0, &enc.updateStream)
-		enc.writeBlock(enc.stream, &headerStream)
+		enc.writeBlock(logger, 0, &enc.updateStream)
+		enc.writeBlock(logger, enc.stream, &headerStream)
 
 		if enc.acknowledge {
 			enc.qpack.AcknowledgeHeader(enc.stream)

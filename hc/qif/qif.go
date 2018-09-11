@@ -16,10 +16,13 @@ var logbuf bytes.Buffer
 func usage() {
 	msg := "Usage: %s <cmd> [args]\n\n" +
 		"Encode from a QIF file:\n" +
-		"    ... encode [-a] [-t size] [in [out]]\n\n" +
-		"    -a    Treat every block as immediately acknowledged\n\n" +
+		"    ... encode [-a] [-t cap] [-r cap] [in [out]]\n\n" +
+		"    -a    Treat every block as immediately acknowledged\n" +
+		"    -t    Set the capacity of the table\n" +
+		"    -r    Set the referenceable capacity (must be after -t)\n\n" +
 		"Decode from a QIF file:\n" +
-		"    ... decode [in [out]]\n\n"
+		"    ... decode [in [out]]\n" +
+		"    -t    Set the capacity of the table\n\n"
 	fmt.Fprintf(os.Stderr, msg, os.Args[0])
 	os.Exit(2)
 }
@@ -47,16 +50,26 @@ func main() {
 	switch os.Args[1] {
 	case "encode":
 		ack := false
-		if len(args) >= 1 && args[0] == "-a" {
-			ack = true
-			args = args[1:]
-		}
-		tableSize := hc.TableCapacity(4096)
-		if len(args) >= 2 && args[0] == "-t" {
-			sz, err := strconv.Atoi(args[1])
-			check(err)
-			tableSize = hc.TableCapacity(sz)
-			args = args[2:]
+		capacity := hc.TableCapacity(4096)
+		referenceable := hc.TableCapacity(4096)
+		for len(args) > 1 && args[0][0:1] == "-" {
+			if args[0] == "-a" {
+				ack = true
+				args = args[1:]
+			}
+			if len(args) >= 2 && args[0] == "-t" {
+				sz, err := strconv.Atoi(args[1])
+				check(err)
+				capacity = hc.TableCapacity(sz)
+				referenceable = capacity
+				args = args[2:]
+			}
+			if len(args) >= 2 && args[0] == "-r" {
+				sz, err := strconv.Atoi(args[1])
+				check(err)
+				referenceable = hc.TableCapacity(sz)
+				args = args[2:]
+			}
 		}
 		var enc *encoder
 		switch len(args) {
@@ -69,11 +82,21 @@ func main() {
 		}
 		defer enc.Close()
 		enc.acknowledge = ack
-		enc.qpack.SetCapacity(tableSize)
+		enc.qpack.SetCapacity(capacity)
+		enc.qpack.SetReferenceableLimit(referenceable)
 		enc.Encode(logger)
 
 	case "decode":
 		var dec *decoder
+		capacity := hc.TableCapacity(4096)
+		for len(args) > 1 && args[0][0:1] == "-" {
+			if len(args) >= 2 && args[0] == "-t" {
+				sz, err := strconv.Atoi(args[1])
+				check(err)
+				capacity = hc.TableCapacity(sz)
+				args = args[2:]
+			}
+		}
 		switch len(args) {
 		case 0:
 			dec = newDecoder("", "")
@@ -83,6 +106,7 @@ func main() {
 			dec = newDecoder(args[0], args[1])
 		}
 		defer dec.Close()
+		dec.qpack.Table.SetCapacity(capacity)
 		dec.Decode(logger)
 
 	default:

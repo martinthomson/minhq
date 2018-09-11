@@ -341,7 +341,8 @@ func (qt *QpackEncoderTable) LookupReferenceable(name string, value string, maxB
 	}
 	end := qt.referenceable
 	if end <= start {
-		end = start // i.e., don't search the dynamic table at all.
+		start = 0
+		end = 0
 	}
 	if useQpackStaticTable {
 		return qt.lookupImpl(qpackStaticTable, name, value, start, end)

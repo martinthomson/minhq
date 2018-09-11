@@ -15,13 +15,8 @@ type qpackTableCommon struct {
 	tableCommon
 }
 
-const useQpackStaticTable = true
-
 // Lookup finds an entry.
 func (table *qpackTableCommon) Lookup(name string, value string) (Entry, Entry) {
-	if useQpackStaticTable {
-		return table.lookupImpl(qpackStaticTable, name, value, 0, len(table.dynamic))
-	}
 	return table.lookupImpl(hpackStaticTable, name, value, 0, len(table.dynamic))
 }
 
@@ -36,14 +31,6 @@ func (table *qpackTableCommon) Index(e Entry) int {
 
 // GetStatic returns the static table entry at the index i.
 func (table *qpackTableCommon) GetStatic(i int) Entry {
-	if useQpackStaticTable {
-		if i < 0 || i >= len(qpackStaticTable) {
-			return nil
-		}
-		return qpackStaticTable[i]
-	}
-
-	// Use the HPACK table temporarily.
 	i-- // one-based indexing, gross.
 	if i < 0 || i >= len(hpackStaticTable) {
 		return nil
@@ -350,9 +337,6 @@ func (qt *QpackEncoderTable) LookupReferenceable(name string, value string, maxB
 	if end <= start {
 		start = 0
 		end = 0
-	}
-	if useQpackStaticTable {
-		return qt.lookupImpl(qpackStaticTable, name, value, start, end)
 	}
 	return qt.lookupImpl(hpackStaticTable, name, value, start, end)
 }

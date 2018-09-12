@@ -287,8 +287,8 @@ func NewQpackEncoderTable(capacity TableCapacity, referenceable TableCapacity) *
 	return &qt
 }
 
-func (qt *QpackEncoderTable) added(increase TableCapacity) {
-	updatedSize := qt.referenceableSize + increase
+func (qt *QpackEncoderTable) added(qe DynamicEntry) {
+	updatedSize := qt.referenceableSize + qe.Size()
 	i := qt.referenceable + 1
 	for updatedSize > qt.referenceableLimit {
 		i--
@@ -298,9 +298,12 @@ func (qt *QpackEncoderTable) added(increase TableCapacity) {
 	qt.referenceableSize = updatedSize
 }
 
-func (qt *QpackEncoderTable) removed(reduction TableCapacity) {
-	qt.referenceable--
-	qt.referenceableSize -= reduction
+func (qt *QpackEncoderTable) removed(qe DynamicEntry) {
+	// If this was referenceable, then remove it.
+	if qt.referenceable > qe.Index(qt.base) {
+		qt.referenceable--
+		qt.referenceableSize -= qe.Size()
+	}
 }
 
 type qpackEncoderEvictWrapper struct {
@@ -316,7 +319,7 @@ func (qevict *qpackEncoderEvictWrapper) CanEvict(e DynamicEntry) bool {
 	if qe.inUse() {
 		return false
 	}
-	qevict.table.removed(qe.Size())
+	qevict.table.removed(qe)
 	return true
 }
 
@@ -326,7 +329,7 @@ func (qt *QpackEncoderTable) Insert(name string, value string, evict evictionChe
 	entry := &qpackEncoderEntry{qpackEntry{BasicDynamicEntry{name, value, 0}}, 0}
 	inserted := qt.insert(entry, &qpackEncoderEvictWrapper{evict, qt})
 	if inserted {
-		qt.added(entry.Size())
+		qt.added(entry)
 		return entry
 	}
 	return nil

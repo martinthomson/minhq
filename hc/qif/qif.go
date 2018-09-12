@@ -39,6 +39,78 @@ func check(err error) {
 	}
 }
 
+func encode(logger *log.Logger, args []string) {
+	ack := false
+	capacity := hc.TableCapacity(4096)
+	referenceable := hc.TableCapacity(4096)
+	maxBlocked := 0
+	for len(args) > 1 && args[0][0:1] == "-" {
+		if args[0] == "-a" {
+			ack = true
+			args = args[1:]
+		}
+		if len(args) >= 2 && args[0] == "-b" {
+			sz, err := strconv.Atoi(args[1])
+			check(err)
+			maxBlocked = sz
+			args = args[2:]
+		}
+		if len(args) >= 2 && args[0] == "-t" {
+			sz, err := strconv.Atoi(args[1])
+			check(err)
+			capacity = hc.TableCapacity(sz)
+			referenceable = capacity
+			args = args[2:]
+		}
+		if len(args) >= 2 && args[0] == "-r" {
+			sz, err := strconv.Atoi(args[1])
+			check(err)
+			referenceable = hc.TableCapacity(sz)
+			args = args[2:]
+		}
+	}
+
+	var enc *encoder
+	switch len(args) {
+	case 0:
+		enc = newEncoder("", "")
+	case 1:
+		enc = newEncoder(args[0], "")
+	default:
+		enc = newEncoder(args[0], args[1])
+	}
+	defer enc.Close()
+	enc.acknowledge = ack
+	enc.qpack.SetCapacity(capacity)
+	enc.qpack.SetReferenceableLimit(referenceable)
+	enc.qpack.SetMaxBlockedStreams(maxBlocked)
+	enc.Encode(logger)
+}
+
+func decode(logger *log.Logger, args []string) {
+	var dec *decoder
+	capacity := hc.TableCapacity(4096)
+	for len(args) > 1 && args[0][0:1] == "-" {
+		if len(args) >= 2 && args[0] == "-t" {
+			sz, err := strconv.Atoi(args[1])
+			check(err)
+			capacity = hc.TableCapacity(sz)
+			args = args[2:]
+		}
+	}
+	switch len(args) {
+	case 0:
+		dec = newDecoder("", "")
+	case 1:
+		dec = newDecoder(args[0], "")
+	default:
+		dec = newDecoder(args[0], args[1])
+	}
+	defer dec.Close()
+	dec.qpack.Table.SetCapacity(capacity)
+	dec.Decode(logger)
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
@@ -46,68 +118,12 @@ func main() {
 
 	logger := log.New(&logbuf, "", log.Lmicroseconds|log.Lshortfile)
 
-	args := os.Args[2:]
 	switch os.Args[1] {
 	case "encode":
-		ack := false
-		capacity := hc.TableCapacity(4096)
-		referenceable := hc.TableCapacity(4096)
-		for len(args) > 1 && args[0][0:1] == "-" {
-			if args[0] == "-a" {
-				ack = true
-				args = args[1:]
-			}
-			if len(args) >= 2 && args[0] == "-t" {
-				sz, err := strconv.Atoi(args[1])
-				check(err)
-				capacity = hc.TableCapacity(sz)
-				referenceable = capacity
-				args = args[2:]
-			}
-			if len(args) >= 2 && args[0] == "-r" {
-				sz, err := strconv.Atoi(args[1])
-				check(err)
-				referenceable = hc.TableCapacity(sz)
-				args = args[2:]
-			}
-		}
-		var enc *encoder
-		switch len(args) {
-		case 0:
-			enc = newEncoder("", "")
-		case 1:
-			enc = newEncoder(args[0], "")
-		default:
-			enc = newEncoder(args[0], args[1])
-		}
-		defer enc.Close()
-		enc.acknowledge = ack
-		enc.qpack.SetCapacity(capacity)
-		enc.qpack.SetReferenceableLimit(referenceable)
-		enc.Encode(logger)
+		encode(logger, os.Args[2:])
 
 	case "decode":
-		var dec *decoder
-		capacity := hc.TableCapacity(4096)
-		for len(args) > 1 && args[0][0:1] == "-" {
-			if len(args) >= 2 && args[0] == "-t" {
-				sz, err := strconv.Atoi(args[1])
-				check(err)
-				capacity = hc.TableCapacity(sz)
-				args = args[2:]
-			}
-		}
-		switch len(args) {
-		case 0:
-			dec = newDecoder("", "")
-		case 1:
-			dec = newDecoder(args[0], "")
-		default:
-			dec = newDecoder(args[0], args[1])
-		}
-		defer dec.Close()
-		dec.qpack.Table.SetCapacity(capacity)
-		dec.Decode(logger)
+		decode(logger, os.Args[2:])
 
 	default:
 		usage()

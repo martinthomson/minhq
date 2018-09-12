@@ -72,6 +72,11 @@ func (c *ClientConnection) HandleFrame(t FrameType, r FrameReader) error {
 
 // Fetch makes a request.
 func (c *ClientConnection) Fetch(method string, target string, headers ...hc.HeaderField) (*ClientRequest, error) {
+	err := hc.ValidatePseudoHeaders(headers)
+	if err != nil {
+		return nil, err
+	}
+
 	<-c.ready
 	if c.GetState() != minq.StateEstablished {
 		return nil, errors.New("connection not open")

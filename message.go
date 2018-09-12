@@ -174,6 +174,10 @@ func (msg *IncomingMessage) handleMessage(headersHandler initialHeadersHandler,
 				if err != nil {
 					return err
 				}
+				err = hc.ValidatePseudoHeaders(headers)
+				if err != nil {
+					return err
+				}
 
 				if gotFirstHeaders {
 					msg.trailers <- headers

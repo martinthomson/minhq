@@ -451,10 +451,6 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 		addHeader(h)
 	}
 
-	err = validatePseudoHeaders(headers)
-	if err != nil {
-		return nil, err
-	}
 	if largestReference > 0 {
 		decoder.acknowledged <- &headerBlockAck{id, largestReference}
 	}

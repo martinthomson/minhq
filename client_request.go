@@ -96,6 +96,10 @@ func (req *ClientRequest) handlePushPromise(s *stream, c *ClientConnection, r io
 	if err != nil {
 		return err
 	}
+	err = hc.ValidatePseudoHeaders(headers)
+	if err != nil {
+		return err
+	}
 	err = fr.CheckForEOF()
 	if err != nil {
 		return err

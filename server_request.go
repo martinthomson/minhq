@@ -71,6 +71,10 @@ func (req *ServerRequest) setHeaders(headers []hc.HeaderField) error {
 
 func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 	s *sendStream, push *ServerPushRequest) (*ServerResponse, error) {
+	err := hc.ValidatePseudoHeaders(headers)
+	if err != nil {
+		return nil, err
+	}
 	<-req.C.ready
 	allHeaders := append([]hc.HeaderField{
 		hc.HeaderField{Name: ":status", Value: strconv.Itoa(statusCode)},
@@ -81,7 +85,7 @@ func (req *ServerRequest) sendResponse(statusCode int, headers []hc.HeaderField,
 		PushRequest:     push,
 		OutgoingMessage: newOutgoingMessage(&req.C.connection, s, allHeaders),
 	}
-	err := response.writeHeaderBlock(allHeaders)
+	err = response.writeHeaderBlock(allHeaders)
 	if err != nil {
 		return nil, err
 	}
@@ -99,6 +103,10 @@ func (req *ServerRequest) Respond(statusCode int, headers ...hc.HeaderField) (*S
 
 // Push creates a new server push.
 func (req *ServerRequest) Push(method string, target string, headers ...hc.HeaderField) (*ServerPushRequest, error) {
+	err := hc.ValidatePseudoHeaders(headers)
+	if err != nil {
+		return nil, err
+	}
 	url, allHeaders, err := buildRequestHeaderFields(method, req.Target(), target, headers)
 	if err != nil {
 		return nil, err
@@ -180,6 +188,10 @@ type ServerPushRequest struct {
 
 // Respond on ServerPushRequest is functionally identical to the same function on ServerRequest.
 func (push *ServerPushRequest) Respond(statusCode int, headers ...hc.HeaderField) (*ServerResponse, error) {
+	err := hc.ValidatePseudoHeaders(headers)
+	if err != nil {
+		return nil, err
+	}
 	if push.Request.C.pushCancelled(push.PushID) {
 		return nil, ErrPushCancelled
 	}
@@ -188,7 +200,7 @@ func (push *ServerPushRequest) Respond(statusCode int, headers ...hc.HeaderField
 		return nil, errors.New("No avaliable send streams for push response")
 	}
 	s := newSendStream(send)
-	err := s.WriteByte(byte(unidirectionalStreamPush))
+	err = s.WriteByte(byte(unidirectionalStreamPush))
 	if err != nil {
 		return nil, err
 	}

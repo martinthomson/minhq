@@ -31,7 +31,7 @@ func (hf HeaderField) size() TableCapacity {
 }
 
 // Sanity-check header ordering.
-func validatePseudoHeaders(headers []HeaderField) error {
+func ValidatePseudoHeaders(headers []HeaderField) error {
 	pseudo := true
 	for _, h := range headers {
 		if h.Name[0] == ':' {

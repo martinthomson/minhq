@@ -492,14 +492,9 @@ func (encoder *QpackEncoder) writeHeaderBlock(headerWriter io.Writer, state *qpa
 // result in errors.
 func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
 	id uint64, headers ...HeaderField) error {
-	err := validatePseudoHeaders(headers)
-	if err != nil {
-		return err
-	}
-
 	var state qpackWriterState
 	state.initHeaders(headers)
-	err = encoder.writeTableChanges(&state, id)
+	err := encoder.writeTableChanges(&state, id)
 	if err != nil {
 		return err
 	}

@@ -139,6 +139,8 @@ type QpackEncoder struct {
 	// highestAcknowledged is the highest dynamic table entry base
 	// that the peer has acknowledged.
 	highestAcknowledged int
+	// unacknowledgedSize is the amount of space taken by unacknowledged entries
+	unacknowledgedSize TableCapacity
 	// blockedStreams is the number of streams that are currently
 	// potentially blocked.
 	blockedStreams int
@@ -197,9 +199,35 @@ func (encoder *QpackEncoder) ServiceAcknowledgments(ar io.Reader) error {
 	}
 }
 
+// insert wraps the Insert method of the table to ensure that new additions
+// are checked and accounted.
+func (encoder *QpackEncoder) insert(name string, value string, evict evictionCheck) DynamicEntry {
+	// Make a temporary entry so that we can ask it how big it is.
+	var entry DynamicEntry = &BasicDynamicEntry{name, value, 0}
+	// We want to make sure that this entry is usable.  So we don't allow it
+	// to push beyond the referenceable limit.  We include all other entries
+	// that we've added but not had acknowledged in this calculation so that
+	// every entry has an opportunity to be used.  There's a failure mode,
+	// particularly with smaller tables, where entries are added and evicted
+	// before they can ever be used.  This happens particularly if the
+	// decoder has a low limit on the number of blocking streams, where the
+	// encoder adds to the dynamic table, but cannot use those entries until
+	// they are acknowledged.  If they are evicted before they can be used,
+	// the table updates are a total waste.
+	if entry.Size()+encoder.unacknowledgedSize > encoder.table.referenceableLimit {
+		encoder.logger.Printf("not adding entry of size %v", entry.Size())
+		return nil
+	}
+	entry = encoder.Table.Insert(name, value, evict)
+	if entry != nil {
+		encoder.unacknowledgedSize += entry.Size()
+	}
+	return entry
+}
+
 // writeDuplicate duplicates the indicated entry.
 func (encoder *QpackEncoder) writeDuplicate(entry DynamicEntry, state *qpackWriterState, i int) error {
-	inserted := encoder.Table.Insert(entry.Name(), entry.Value(), state)
+	inserted := encoder.insert(entry.Name(), entry.Value(), state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
 		return nil
@@ -223,7 +251,7 @@ func (encoder *QpackEncoder) writeDuplicate(entry DynamicEntry, state *qpackWrit
 func (encoder *QpackEncoder) writeInsert(state *qpackWriterState, i int,
 	nameMatch Entry) error {
 	h := state.headers[i]
-	inserted := encoder.Table.Insert(h.Name, h.Value, state)
+	inserted := encoder.insert(h.Name, h.Value, state)
 	if inserted == nil {
 		// Leaving h unmodified causes a literal to be written.
 		return nil
@@ -502,6 +530,25 @@ func (encoder *QpackEncoder) WriteHeaderBlock(headerWriter io.Writer,
 	return encoder.writeHeaderBlock(headerWriter, &state)
 }
 
+// updateHighestAcknowledged increases the acknowledgment count.
+func (encoder *QpackEncoder) updateHighestAcknowledged(increment int) {
+	if increment <= 0 {
+		panic("can't unacknowledge entries")
+	}
+	if increment+encoder.highestAcknowledged > encoder.Table.Base() {
+		panic("can't acknowledge more than we've sent")
+	}
+	encoder.highestAcknowledged += increment
+
+	// Now we need to reduce the count of unacknowledged entry sizes.
+	for i := 0; i < increment; i++ {
+		// Use highestAcknowledged as the base to get entries
+		// starting at the highest acknowledged and working backwards.
+		entry := encoder.Table.GetDynamic(i, encoder.highestAcknowledged)
+		encoder.unacknowledgedSize -= entry.Size()
+	}
+}
+
 // AcknowledgeInsert acknowledges that the remote decoder has received a
 // new insert or duplicate instructions.
 func (encoder *QpackEncoder) AcknowledgeInsert(increment int) error {
@@ -515,7 +562,7 @@ func (encoder *QpackEncoder) AcknowledgeInsert(increment int) error {
 		return ErrIndexError
 	}
 	encoder.blockedStreams = encoder.usage.countBlockedStreams(base)
-	encoder.highestAcknowledged = base
+	encoder.updateHighestAcknowledged(increment)
 	return nil
 }
 
@@ -530,7 +577,7 @@ func (encoder *QpackEncoder) AcknowledgeHeader(id uint64) error {
 	}
 	if removedLargest > encoder.highestAcknowledged && newLargest <= encoder.highestAcknowledged {
 		encoder.blockedStreams--
-		encoder.highestAcknowledged = removedLargest
+		encoder.updateHighestAcknowledged(removedLargest - encoder.highestAcknowledged)
 	}
 	return nil
 }

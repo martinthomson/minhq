@@ -107,11 +107,10 @@ func setupEncoder(t *testing.T, encoder *hc.QpackEncoder, updateBuf *bytes.Buffe
 }
 
 // Attempt to write to the table.  Only literals should be produced.
-func assertQpackTableFull(t *testing.T, encoder *hc.QpackEncoder, updateBuf *bytes.Buffer) {
-	updateBuf.Reset()
-
+func assertQpackTableFull(t *testing.T, encoder *hc.QpackEncoder) {
 	fullToken := uint64(890346979)
 	var headerBuf bytes.Buffer
+	var updateBuf bytes.Buffer
 	err := encoder.WriteHeaderBlock(&headerBuf, fullToken,
 		hc.HeaderField{Name: "namef", Value: "valuef"})
 	assert.Nil(t, err)
@@ -157,7 +156,7 @@ func TestQpackDuplicate(t *testing.T) {
 		{"name1", "value1"},
 	})
 
-	assertQpackTableFull(t, encoder, &updateBuf)
+	assertQpackTableFull(t, encoder)
 }
 
 // TestQpackDuplicateLiteral sets up the conditions for a duplication, but the
@@ -174,23 +173,58 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 	assert.Nil(t, err)
 	t.Logf("Force Duplicate: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
-	// name0:value0 can be added, but there isn't enough room to duplicate
-	// name1:value1, so it uses a literal.
-	expectedUpdates, err := hex.DecodeString("64a874941f85ee3a2d283f")
-	assert.Nil(t, err)
-	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
+	// Neither entry can be added because that would increase the amount of
+	// unacknowledged entries beyond the referenceable limit.  So we get a literal
+	// for name0:value0 and a reference to name1:value1
+	assert.Equal(t, 0, updateBuf.Len())
 
-	expectedHeader, err := hex.DecodeString("0300802ca874943f85ee3a2d287f")
+	expectedHeader, err := hex.DecodeString("01002ca874941f85ee3a2d283f80")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
 	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
-		{"name0", "value0"},
 		{"name2", "value2"},
 		{"name1", "value1"},
 	})
 
-	assertQpackTableFull(t, encoder, &updateBuf)
+	assertQpackTableFull(t, encoder)
+
+	// Now acknowledge the setup and these new additions.
+	assert.Nil(t, encoder.AcknowledgeHeader(setupToken))
+	assert.Nil(t, encoder.AcknowledgeHeader(defaultToken))
+	updateBuf.Reset()
+	headerBuf.Reset()
+
+	// From here, the first entry can be added.
+	// That pushes name1:value1 into being unreferenceable, so
+	// it will be duplicated.
+	// That prevents any further additions, so while name2:value2
+	// could be duplicated - it's in the table - no new entries
+	// can be added because there is already too much unacknowledged
+	// So name2:value2 is sent as a literal.
+	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken+1,
+		hc.HeaderField{Name: "name0", Value: "value0"},
+		hc.HeaderField{Name: "name1", Value: "value1"},
+		hc.HeaderField{Name: "name2", Value: "value2"})
+	assert.Nil(t, err)
+	t.Logf("Force Duplicate: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	expectedUpdates, err := hex.DecodeString("64a874941f85ee3a2d283f02")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
+
+	expectedHeader, err = hex.DecodeString("040081802ca874945f85ee3a2d28bf")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name1", "value1"},
+		{"name0", "value0"},
+		{"name2", "value2"},
+	})
+
+	// No more inserts can be made.
+	assertQpackTableFull(t, encoder)
 }
 
 func TestQpackBlockedEncode(t *testing.T) {
@@ -378,7 +412,7 @@ func TestNotIndexedNameReference(t *testing.T) {
 	// Even after acknowledging the header block from setup, the reference to the
 	// initial name1 entry remains outstanding and blocks eviction.
 	assert.Nil(t, encoder.AcknowledgeHeader(setupToken))
-	assertQpackTableFull(t, encoder, &updateBuf)
+	assertQpackTableFull(t, encoder)
 }
 
 type ackCheckType byte

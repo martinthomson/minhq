@@ -68,7 +68,7 @@ func NewQpackDecoderTable(capacity TableCapacity) *QpackDecoderTable {
 }
 
 // GetDynamic gets the entry at index i relative to the specified base.
-func (qt *QpackDecoderTable) GetDynamic(i int, base int) Entry {
+func (qt *QpackDecoderTable) GetDynamic(i int, base int) DynamicEntry {
 	defer qt.lock.RUnlock()
 	qt.lock.RLock()
 	return qt.table.GetDynamic(i, base)
@@ -327,10 +327,6 @@ func (qevict *qpackEncoderEvictWrapper) CanEvict(e DynamicEntry) bool {
 // limit on referenceable entries can be maintained.
 func (qt *QpackEncoderTable) Insert(name string, value string, evict evictionCheck) DynamicEntry {
 	entry := &qpackEncoderEntry{qpackEntry{BasicDynamicEntry{name, value, 0}}, 0}
-	if entry.Size() > qt.referenceableLimit {
-		// Don't bother if it's going to push out all the other referenceable entries.
-		return nil
-	}
 	inserted := qt.insert(entry, &qpackEncoderEvictWrapper{evict, qt})
 	if inserted {
 		qt.added(entry)

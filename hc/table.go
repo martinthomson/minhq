@@ -76,7 +76,7 @@ type Table interface {
 	// single space (HPACK), the index is unique.
 	Index(Entry) int
 	GetStatic(i int) Entry
-	GetDynamic(i int, base int) Entry
+	GetDynamic(i int, base int) DynamicEntry
 	Insert(name string, value string, evict evictionCheck) DynamicEntry
 	Capacity() TableCapacity
 	SetCapacity(TableCapacity)
@@ -107,7 +107,7 @@ func (table *tableCommon) Base() int {
 }
 
 // GetDynamic retrieves a dynamic table entry using zero-based indexing from the base.
-func (table *tableCommon) GetDynamic(i int, base int) Entry {
+func (table *tableCommon) GetDynamic(i int, base int) DynamicEntry {
 	delta := table.Base() - base
 	if delta < 0 {
 		return nil

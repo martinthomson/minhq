@@ -30,7 +30,8 @@ func (hf HeaderField) size() TableCapacity {
 	return tableOverhead + TableCapacity(len(hf.Name)+len(hf.Value))
 }
 
-// Sanity-check header ordering.
+// ValidatePseudoHeaders checks that pseudo-headers appear strictly before
+// all other header fields.
 func ValidatePseudoHeaders(headers []HeaderField) error {
 	pseudo := true
 	for _, h := range headers {

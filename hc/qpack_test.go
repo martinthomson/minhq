@@ -727,26 +727,26 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 		{
 			resetTable: true,
 			headers: []hc.HeaderField{
-				{Name: ":status", Value: "200"},
-				{Name: "cache-control", Value: "private"},
-				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
-				{Name: "location", Value: "https://www.example.com"},
+				{Name: ":method", Value: "GET"},
+				{Name: ":scheme", Value: "http"},
+				{Name: ":path", Value: "/"},
+				{Name: ":authority", Value: "www.example.com"},
 			},
-			qpackUpdates: "",
-			qpackHeader:  "0300d5828180",
+			qpackUpdates: "", // updates for this header block ...
+			qpackHeader:  "0100d1d6c180",
 		},
 		{
 			resetTable: false,
 			headers: []hc.HeaderField{
-				{Name: ":status", Value: "307"},
-				{Name: "cache-control", Value: "private"},
-				{Name: "date", Value: "Mon, 21 Oct 2013 20:13:21 GMT"},
-				{Name: "location", Value: "https://www.example.com"},
+				{Name: ":method", Value: "GET"},
+				{Name: ":scheme", Value: "http"},
+				{Name: ":path", Value: "/"},
+				{Name: ":authority", Value: "www.example.com"},
+				{Name: "cache-control", Value: "no-cache"},
 			},
-			qpackUpdates: "f10770726976617465" +
-				"c31d4d6f6e2c203231204f637420323031332032303a31333a323120474d54" + "c91768747470733a2f2f7777772e6578616d706c652e636f6d" +
-				"d503333037",
-			qpackHeader: "040080838281",
+			// ... are moved to this one
+			qpackUpdates: "c00f7777772e6578616d706c652e636f6d",
+			qpackHeader:  "0100d1d6c180e7",
 		},
 	})
 }
@@ -761,7 +761,7 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				{Name: "location", Value: "https://www.example.com"},
 			},
 			qpackUpdates: "",
-			qpackHeader:  "0200d58180",
+			qpackHeader:  "0200d98180",
 		},
 		{
 			resetTable: false,
@@ -770,9 +770,12 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				{Name: "cache-control", Value: "private"},
 				{Name: "location", Value: "https://www.example.com"},
 			},
-			qpackUpdates: "f10770726976617465" +
-				"c91768747470733a2f2f7777772e6578616d706c652e636f6d" +
-				"d503333037" + "02",
+			qpackUpdates:
+			// updates for the first header block:
+			"e40770726976617465cc1768747470733a2f2f777777" +
+				"2e6578616d706c652e636f6d" +
+				// updates for the second header block:
+				"d803333037" + "02", // 02 == duplicate "cache-control"
 			qpackHeader: "0400818082",
 		},
 	})

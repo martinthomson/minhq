@@ -552,11 +552,12 @@ func (encoder *QpackEncoder) updateHighestAcknowledged(increment int) {
 // AcknowledgeInsert acknowledges that the remote decoder has received a
 // new insert or duplicate instructions.
 func (encoder *QpackEncoder) AcknowledgeInsert(increment int) error {
-	defer encoder.mutex.Unlock()
-	encoder.mutex.Lock()
 	if increment <= 0 {
 		return ErrIndexError
 	}
+
+	defer encoder.mutex.Unlock()
+	encoder.mutex.Lock()
 	base := encoder.highestAcknowledged + increment
 	if base > encoder.Table.Base() {
 		return ErrIndexError

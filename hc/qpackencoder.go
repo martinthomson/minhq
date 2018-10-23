@@ -482,9 +482,17 @@ func (encoder *QpackEncoder) writeLiteral(writer *Writer, state *qpackWriterStat
 	return nil
 }
 
+func (encoder *QpackEncoder) encodeLargestReference(largestBase int) uint64 {
+	if largestBase == 0 {
+		return 0
+	}
+	maxEntries := uint64(encoder.Table.Capacity() / entryOverhead)
+	return (uint64(largestBase-1) % (2 * maxEntries)) + 1
+}
+
 func (encoder *QpackEncoder) writeHeaderBlock(headerWriter io.Writer, state *qpackWriterState) error {
 	w := NewWriter(headerWriter)
-	err := w.WriteInt(uint64(state.largestBase), 8)
+	err := w.WriteInt(encoder.encodeLargestReference(state.largestBase), 8)
 	if err != nil {
 		return err
 	}

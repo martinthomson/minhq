@@ -348,15 +348,30 @@ func (decoder *QpackDecoder) readLiteralWithNameLiteral(reader *Reader, base int
 	return &HeaderField{name, value, neverIndex == 1}, nil
 }
 
+func (decoder *QpackDecoder) decodeLargestReference(lrRaw uint64) int {
+	decoder.logger.Printf("largest reference %v, current base %v",
+		lrRaw, decoder.Table.Base())
+	if lrRaw == 0 {
+		return 0
+	}
+	maxEntries := uint64(decoder.Table.Capacity() / entryOverhead)
+	fullRange := maxEntries * 2
+
+	// Determine the lowest possible value, which is
+	//   floor((base + maxEntries -1) / range) * range
+	minValue := (uint64(decoder.Table.Base()) + maxEntries - 1) / fullRange
+	minValue *= fullRange
+	return int(minValue + lrRaw)
+}
+
 // readBase reads the header block header and blocks until the decoder is
 // ready to process the remainder of the block.
 func (decoder *QpackDecoder) readBase(reader *Reader) (int, int, error) {
-	largestReference, err := reader.ReadIndex(8)
+	lrRaw, err := reader.ReadInt(8)
 	if err != nil {
 		return 0, 0, err
 	}
-	decoder.logger.Printf("largest reference %v, current base %v",
-		largestReference, decoder.table.Base())
+	largestReference := decoder.decodeLargestReference(lrRaw)
 	// This blocks until the dynamic table is ready.
 	decoder.table.WaitForEntry(largestReference)
 

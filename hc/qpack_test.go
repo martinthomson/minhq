@@ -415,6 +415,61 @@ func TestNotIndexedNameReference(t *testing.T) {
 	assertQpackTableFull(t, encoder)
 }
 
+func TestEncodeLargestReferenceWrap(t *testing.T) {
+	var updateBuf bytes.Buffer
+	// Size here has to be enough for two entries, but less than 32*3.
+	// That way, the largest reference wraps properly.
+	encoder := hc.NewQpackEncoder(&updateBuf, 95, 95)
+
+	// Start with two easy entries.
+	setupEncoder(t, encoder, &updateBuf)
+	assert.Nil(t, encoder.AcknowledgeHeader(setupToken))
+
+	// Add two more, which evict the first and cause.
+	var headerBuf bytes.Buffer
+	updateBuf.Reset()
+	err := encoder.WriteHeaderBlock(&headerBuf, defaultToken,
+		hc.HeaderField{Name: "name3", Value: "value3"}, // this uses the index
+		hc.HeaderField{Name: "name4", Value: "value4"}, // this inserts fine
+	)
+	assert.Nil(t, err)
+	t.Logf("Fill the table: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	expectedUpdates, err := hex.DecodeString("64a874959f85ee3a2d2b3f64a87495af85ee3a2d2b5f")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
+	expectedHeader, err := hex.DecodeString("04008180")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name4", "value4"},
+		{"name3", "value3"},
+	})
+	assert.Nil(t, encoder.AcknowledgeHeader(defaultToken))
+
+	// Now the largest reference encoding will start from 1 again.
+	headerBuf.Reset()
+	updateBuf.Reset()
+	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken+1,
+		hc.HeaderField{Name: "name5", Value: "value5"},
+	)
+	assert.Nil(t, err)
+	t.Logf("Roll over: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
+
+	expectedUpdates, err = hex.DecodeString("64a87495bf85ee3a2d2b7f")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
+	expectedHeader, err = hex.DecodeString("010080")
+	assert.Nil(t, err)
+	assert.Equal(t, expectedHeader, headerBuf.Bytes())
+
+	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
+		{"name5", "value5"},
+		{"name4", "value4"},
+	})
+}
+
 type ackCheckType byte
 
 const (
@@ -791,4 +846,28 @@ func TestSingleRecordOverflow(t *testing.T) {
 	assert.Nil(t, err)
 	err = decoder.ReadTableUpdates(bytes.NewReader(updates))
 	assert.Equal(t, err, hc.ErrTableOverflow)
+}
+
+func TestDecoderLargestReferenceOverflow(t *testing.T) {
+	ackChecker := newAckChecker(t)
+	// Make space enough for two entries, but keep it smaller than 3*32,
+	// so that the largest reference encoding wraps after 4 inserts.
+	decoder := hc.NewQpackDecoder(ackChecker, 95)
+	defer decoder.Close()
+	updates, err := hex.DecodeString("64a874943f85ee3a2d287f64a874945f85ee3a2d28bf" +
+		"64a874959f85ee3a2d2b3f64a87495af85ee3a2d2b5f" +
+		"64a87495bf85ee3a2d2b7f")
+	assert.Nil(t, err)
+	err = decoder.ReadTableUpdates(bytes.NewReader(updates))
+	assert.Nil(t, err)
+	ackChecker.WaitForBase(5)
+
+	headerBlock, err := hex.DecodeString("010080")
+	assert.Nil(t, err)
+	headers, err := decoder.ReadHeaderBlock(bytes.NewReader(headerBlock), defaultToken)
+	assert.Nil(t, err)
+	t.Logf("Headers: %v", headers)
+	assert.Equal(t, []hc.HeaderField{
+		hc.HeaderField{Name: "name5", Value: "value5"},
+	}, headers)
 }

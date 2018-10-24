@@ -348,7 +348,7 @@ func (decoder *QpackDecoder) readLiteralWithNameLiteral(reader *Reader, base int
 	return &HeaderField{name, value, neverIndex == 1}, nil
 }
 
-func (decoder *QpackDecoder) decodeLargestReference(lrRaw uint64) int {
+func (decoder *QpackDecoder) decodeLargestBase(lrRaw uint64) int {
 	decoder.logger.Printf("largest reference %v, current base %v",
 		lrRaw, decoder.Table.Base())
 	if lrRaw == 0 {
@@ -357,11 +357,18 @@ func (decoder *QpackDecoder) decodeLargestReference(lrRaw uint64) int {
 	maxEntries := uint64(decoder.Table.Capacity() / entryOverhead)
 	fullRange := maxEntries * 2
 
-	// Determine the lowest possible value, which is
-	//   floor((base + maxEntries -1) / range) * range
-	minValue := (uint64(decoder.Table.Base()) + maxEntries - 1) / fullRange
-	minValue *= fullRange
-	return int(minValue + lrRaw)
+	// Determine the maximum possible value, which is base + maxEntries
+	maxValue := uint64(decoder.Table.Base()) + maxEntries
+	// Then round down to a multiple of the full range.
+	rounded := maxValue / fullRange * fullRange
+	// Now add the value (less 1) to this baseline.
+	largestReference := rounded + lrRaw - 1
+	// If it overflows, cut it back down.
+	if largestReference > maxValue && largestReference >= fullRange {
+		largestReference -= fullRange
+	}
+	// Convert largestReference into largest base.
+	return int(largestReference) + 1
 }
 
 // readBase reads the header block header and blocks until the decoder is
@@ -371,9 +378,9 @@ func (decoder *QpackDecoder) readBase(reader *Reader) (int, int, error) {
 	if err != nil {
 		return 0, 0, err
 	}
-	largestReference := decoder.decodeLargestReference(lrRaw)
+	largestBase := decoder.decodeLargestBase(lrRaw)
 	// This blocks until the dynamic table is ready.
-	decoder.table.WaitForEntry(largestReference)
+	decoder.table.WaitForEntry(largestBase)
 
 	sign, err := reader.ReadBit()
 	if err != nil {
@@ -388,15 +395,15 @@ func (decoder *QpackDecoder) readBase(reader *Reader) (int, int, error) {
 	}
 	decoder.logger.Printf("base delta %v %v", sign, delta)
 	// Sign: 1 means negative, 0 means positive.
-	base := largestReference + (delta * (1 - 2*int(sign)))
+	base := largestBase + (delta * (1 - 2*int(sign)))
 	decoder.logger.Printf("base %v", base)
-	return largestReference, base, nil
+	return largestBase, base, nil
 }
 
 // ReadHeaderBlock decodes header fields as they arrive.
 func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderField, error) {
 	reader := NewReader(r)
-	largestReference, base, err := decoder.readBase(reader)
+	largestBase, base, err := decoder.readBase(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -466,8 +473,8 @@ func (decoder *QpackDecoder) ReadHeaderBlock(r io.Reader, id uint64) ([]HeaderFi
 		addHeader(h)
 	}
 
-	if largestReference > 0 {
-		decoder.acknowledged <- &headerBlockAck{id, largestReference}
+	if largestBase > 0 {
+		decoder.acknowledged <- &headerBlockAck{id, largestBase}
 	}
 	return headers, nil
 }

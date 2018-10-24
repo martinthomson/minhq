@@ -486,8 +486,10 @@ func (encoder *QpackEncoder) encodeLargestReference(largestBase int) uint64 {
 	if largestBase == 0 {
 		return 0
 	}
+	// largestBase is one higher than the largest reference, so adjust
+	largestReference := uint64(largestBase - 1)
 	maxEntries := uint64(encoder.Table.Capacity() / entryOverhead)
-	return (uint64(largestBase-1) % (2 * maxEntries)) + 1
+	return (largestReference % (2 * maxEntries)) + 1
 }
 
 func (encoder *QpackEncoder) writeHeaderBlock(headerWriter io.Writer, state *qpackWriterState) error {

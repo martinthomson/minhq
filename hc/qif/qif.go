@@ -16,8 +16,9 @@ var logbuf bytes.Buffer
 func usage() {
 	msg := "Usage: %s <cmd> [args]\n\n" +
 		"Encode from a QIF file:\n" +
-		"    ... encode [-a] [-t cap] [-r cap] [in [out]]\n\n" +
+		"    ... encode [-a] [-b blocked] [-t cap] [-r cap] [in [out]]\n\n" +
 		"    -a    Treat every block as immediately acknowledged\n" +
+		"    -b    Set the number of blocked streams\n" +
 		"    -t    Set the capacity of the table\n" +
 		"    -r    Set the referenceable capacity (must be after -t)\n\n" +
 		"Decode from a QIF file:\n" +

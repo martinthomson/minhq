@@ -96,7 +96,7 @@ func setupEncoder(t *testing.T, encoder *hc.QpackEncoder, updateBuf *bytes.Buffe
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdate, updateBuf.Bytes())
 	// And two references.
-	assert.Equal(t, []byte{0x02, 0x00, 0x81, 0x80}, headerBuf.Bytes())
+	assert.Equal(t, []byte{0x03, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
 	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
 		{"name2", "value2"},
@@ -147,7 +147,7 @@ func TestQpackDuplicate(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
-	assert.Equal(t, []byte{0x04, 0x00, 0x81, 0x80}, headerBuf.Bytes())
+	assert.Equal(t, []byte{0x05, 0x00, 0x81, 0x80}, headerBuf.Bytes())
 
 	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
 		{"name1", "value1"},
@@ -178,7 +178,7 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 	// for name0:value0 and a reference to name1:value1
 	assert.Equal(t, 0, updateBuf.Len())
 
-	expectedHeader, err := hex.DecodeString("01002ca874941f85ee3a2d283f80")
+	expectedHeader, err := hex.DecodeString("02002ca874941f85ee3a2d283f80")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -213,7 +213,7 @@ func TestQpackDuplicateLiteral(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
-	expectedHeader, err = hex.DecodeString("040081802ca874945f85ee3a2d28bf")
+	expectedHeader, err = hex.DecodeString("050081802ca874945f85ee3a2d28bf")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -268,7 +268,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	expectedUpdates, err := hex.DecodeString("64a874959f85ee3a2d2b3f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("03008280")
+	expectedHeader, err = hex.DecodeString("04008280")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -291,7 +291,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	expectedUpdates, err = hex.DecodeString("64a87495af85ee3a2d2b5f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("04008180")
+	expectedHeader, err = hex.DecodeString("05008180")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -316,7 +316,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	t.Logf("Other Stream: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
 
 	assert.Equal(t, []byte{}, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("0200802ca874959f85ee3a2d2b3f")
+	expectedHeader, err = hex.DecodeString("0300802ca874959f85ee3a2d2b3f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -343,7 +343,7 @@ func TestQpackBlockedEncode(t *testing.T) {
 	expectedUpdates, err = hex.DecodeString("64a87495bf85ee3a2d2b7f64a87495cf85ee3a2d2b9f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("0600828180")
+	expectedHeader, err = hex.DecodeString("0700828180")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -373,7 +373,7 @@ func TestQpackNameReference(t *testing.T) {
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
 
-	expectedHeader, err := hex.DecodeString("030080")
+	expectedHeader, err := hex.DecodeString("040080")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -400,7 +400,7 @@ func TestNotIndexedNameReference(t *testing.T) {
 
 	assert.Equal(t, 0, updateBuf.Len())
 
-	expectedHeader, err := hex.DecodeString("01004085ee3a2d2bff")
+	expectedHeader, err := hex.DecodeString("02004085ee3a2d2bff")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -438,7 +438,8 @@ func TestEncodeLargestReferenceWrap(t *testing.T) {
 	expectedUpdates, err := hex.DecodeString("64a874959f85ee3a2d2b3f64a87495af85ee3a2d2b5f")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
-	expectedHeader, err := hex.DecodeString("04008180")
+	// LargestReference wraps (01 -> 4 inserts)
+	expectedHeader, err := hex.DecodeString("01008180")
 	assert.Nil(t, err)
 	assert.Equal(t, expectedHeader, headerBuf.Bytes())
 
@@ -447,27 +448,6 @@ func TestEncodeLargestReferenceWrap(t *testing.T) {
 		{"name3", "value3"},
 	})
 	assert.Nil(t, encoder.AcknowledgeHeader(defaultToken))
-
-	// Now the largest reference encoding will start from 1 again.
-	headerBuf.Reset()
-	updateBuf.Reset()
-	err = encoder.WriteHeaderBlock(&headerBuf, defaultToken+1,
-		hc.HeaderField{Name: "name5", Value: "value5"},
-	)
-	assert.Nil(t, err)
-	t.Logf("Roll over: %x %x", updateBuf.Bytes(), headerBuf.Bytes())
-
-	expectedUpdates, err = hex.DecodeString("64a87495bf85ee3a2d2b7f")
-	assert.Nil(t, err)
-	assert.Equal(t, expectedUpdates, updateBuf.Bytes())
-	expectedHeader, err = hex.DecodeString("010080")
-	assert.Nil(t, err)
-	assert.Equal(t, expectedHeader, headerBuf.Bytes())
-
-	checkDynamicTable(t, encoder.Table, &[]dynamicTableEntry{
-		{"name5", "value5"},
-		{"name4", "value4"},
-	})
 }
 
 type ackCheckType byte
@@ -788,7 +768,7 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 				{Name: ":authority", Value: "www.example.com"},
 			},
 			qpackUpdates: "", // updates for this header block ...
-			qpackHeader:  "0100d1d6c180",
+			qpackHeader:  "0200d1d6c180",
 		},
 		{
 			resetTable: false,
@@ -801,7 +781,7 @@ func TestAsyncHeaderUpdate(t *testing.T) {
 			},
 			// ... are moved to this one
 			qpackUpdates: "c00f7777772e6578616d706c652e636f6d",
-			qpackHeader:  "0100d1d6c180e7",
+			qpackHeader:  "0200d1d6c180e7",
 		},
 	})
 }
@@ -816,7 +796,7 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				{Name: "location", Value: "https://www.example.com"},
 			},
 			qpackUpdates: "",
-			qpackHeader:  "0200d98180",
+			qpackHeader:  "0300d98180",
 		},
 		{
 			resetTable: false,
@@ -831,7 +811,7 @@ func TestAsyncHeaderDuplicate(t *testing.T) {
 				"2e6578616d706c652e636f6d" +
 				// updates for the second header block:
 				"d803333037" + "02", // 02 == duplicate "cache-control"
-			qpackHeader: "0400818082",
+			qpackHeader: "0500818082",
 		},
 	})
 }
@@ -862,7 +842,7 @@ func TestDecoderLargestReferenceOverflow(t *testing.T) {
 	assert.Nil(t, err)
 	ackChecker.WaitForBase(5)
 
-	headerBlock, err := hex.DecodeString("010080")
+	headerBlock, err := hex.DecodeString("020080")
 	assert.Nil(t, err)
 	headers, err := decoder.ReadHeaderBlock(bytes.NewReader(headerBlock), defaultToken)
 	assert.Nil(t, err)

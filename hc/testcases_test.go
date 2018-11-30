@@ -53,7 +53,7 @@ var testCases = []testCase{
 			{"custom-key", "custom-header"},
 		},
 		qpackUpdates: "4a637573746f6d2d6b65790d637573746f6d2d686561646572",
-		qpackHeader:  "010080",
+		qpackHeader:  "020080",
 		qpackTable:   qpackTableState{base: 1},
 	},
 	{
@@ -106,7 +106,7 @@ var testCases = []testCase{
 			{":authority", "www.example.com"},
 		},
 		qpackUpdates: "c00f7777772e6578616d706c652e636f6d",
-		qpackHeader:  "0100d1d6c180",
+		qpackHeader:  "0200d1d6c180",
 		qpackTable:   qpackTableState{base: 1},
 	},
 	{
@@ -125,7 +125,7 @@ var testCases = []testCase{
 			{":authority", "www.example.com"},
 		},
 		qpackUpdates: "",
-		qpackHeader:  "0100d1d6c180e7",
+		qpackHeader:  "0200d1d6c180e7",
 		qpackTable: qpackTableState{
 			base: 1,
 			entries: &[]dynamicTableEntry{
@@ -150,7 +150,7 @@ var testCases = []testCase{
 			{":authority", "www.example.com"},
 		},
 		qpackUpdates: "4a637573746f6d2d6b65790c637573746f6d2d76616c7565",
-		qpackHeader:  "0200d1d7510b2f696e6465782e68746d6c8180",
+		qpackHeader:  "0300d1d7510b2f696e6465782e68746d6c8180",
 		qpackTable: qpackTableState{
 			base: 2,
 			entries: &[]dynamicTableEntry{
@@ -173,7 +173,7 @@ var testCases = []testCase{
 			{":authority", "www.example.com"},
 		},
 		qpackUpdates: "c08cf1e3c2e5f23a6ba0ab90f4ff",
-		qpackHeader:  "0100d1d6c180",
+		qpackHeader:  "0200d1d6c180",
 		qpackTable:   qpackTableState{base: 1},
 	},
 	{
@@ -192,7 +192,7 @@ var testCases = []testCase{
 			{":authority", "www.example.com"},
 		},
 		qpackUpdates: "",
-		qpackHeader:  "0100d1d6c180e7",
+		qpackHeader:  "0200d1d6c180e7",
 		qpackTable: qpackTableState{base: 1,
 			entries: &[]dynamicTableEntry{
 				{":authority", "www.example.com"},
@@ -216,7 +216,7 @@ var testCases = []testCase{
 			{":authority", "www.example.com"},
 		},
 		qpackUpdates: "6825a849e95ba97d7f8925a849e95bb8e8b4bf",
-		qpackHeader:  "0200d1d7518860d5485f2bce9a688180",
+		qpackHeader:  "0300d1d7518860d5485f2bce9a688180",
 		qpackTable: qpackTableState{base: 2,
 			entries: &[]dynamicTableEntry{
 				{"custom-key", "custom-value"},
@@ -244,7 +244,7 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "e40770726976617465c61d4d6f6e2c203231204f637420323031332032" +
 			"303a31333a323120474d54cc1768747470733a2f2f7777772e6578616d706c652e636f6d",
-		qpackHeader: "0300ff03828180",
+		qpackHeader: "0400ff03828180",
 		qpackTable: qpackTableState{base: 3,
 			entries: &[]dynamicTableEntry{
 				{"location", "https://www.example.com"},
@@ -269,7 +269,7 @@ var testCases = []testCase{
 			{"cache-control", "private"},
 		},
 		qpackUpdates: "d803333037",
-		qpackHeader:  "040080838281",
+		qpackHeader:  "050080838281",
 		qpackTable:   qpackTableState{base: 4},
 	},
 	{
@@ -295,7 +295,7 @@ var testCases = []testCase{
 			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 		qpackUpdates: "",
-		qpackHeader: "0300d982561d4d6f6e2c203231204f637420323031332032303a31333a" +
+		qpackHeader: "0400d982561d4d6f6e2c203231204f637420323031332032303a31333a" +
 			"323220474d5480eb5e38666f6f3d4153444a4b48514b425a584f5157454f5049554" +
 			"1585157454f49553b206d61782d6167653d333630303b2076657273696f6e3d31",
 		qpackTable: qpackTableState{base: 4,
@@ -326,7 +326,7 @@ var testCases = []testCase{
 		},
 		qpackUpdates: "e485aec3771a4bc696d07abe941054d444a8200595040b8166e082a6" +
 			"2d1bffcc919d29ad171863c78f0b97c8e9ae82ae43d3",
-		qpackHeader: "0300ff03828180",
+		qpackHeader: "0400ff03828180",
 		qpackTable: qpackTableState{base: 3,
 			entries: &[]dynamicTableEntry{
 				{"location", "https://www.example.com"},
@@ -352,7 +352,7 @@ var testCases = []testCase{
 			{"cache-control", "private"},
 		},
 		qpackUpdates: "d883640eff",
-		qpackHeader:  "040080838281",
+		qpackHeader:  "050080838281",
 		qpackTable:   qpackTableState{base: 4},
 	},
 	{
@@ -377,7 +377,7 @@ var testCases = []testCase{
 			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 		qpackUpdates: "",
-		qpackHeader: "0300" + "d9" + "82" + "5696d07abe941054d444a8200595040b8166e084a62d1bff" +
+		qpackHeader: "0400" + "d9" + "82" + "5696d07abe941054d444a8200595040b8166e084a62d1bff" +
 			"80" + "eb" + "5ead94e7821dd7f2e6c7b335dfdfcd5b3960d5af27087f3672c1" +
 			"ab270fb5291f9587316065c003ed4ee5b1063d5007",
 		qpackTable: qpackTableState{base: 4,
@@ -404,7 +404,7 @@ var testCases = []testCase{
 			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 		qpackUpdates: "c696d07abe941054d444a8200595040b8166e084a62d1bff",
-		qpackHeader:  "0100d980eb",
+		qpackHeader:  "0200d980eb",
 		qpackTable: qpackTableState{base: 1,
 			entries: &[]dynamicTableEntry{
 				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
@@ -425,7 +425,7 @@ var testCases = []testCase{
 			{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},
 		},
 		qpackUpdates: "",
-		qpackHeader:  "0100d980eb",
+		qpackHeader:  "0200d980eb",
 		qpackTable: qpackTableState{base: 1,
 			entries: &[]dynamicTableEntry{
 				{"date", "Mon, 21 Oct 2013 20:13:22 GMT"},

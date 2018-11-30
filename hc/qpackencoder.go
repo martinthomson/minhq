@@ -486,8 +486,9 @@ func (encoder *QpackEncoder) encodeLargestReference(largestBase int) uint64 {
 	if largestBase == 0 {
 		return 0
 	}
-	// largestBase is one higher than the largest reference, so adjust
-	largestReference := uint64(largestBase - 1)
+	// largestBase is the same thing as largestReference here - a count of the number of inserts.
+	// The spec is confused, but the resulting code is fine.
+	largestReference := uint64(largestBase)
 	maxEntries := uint64(encoder.Table.Capacity() / entryOverhead)
 	return (largestReference % (2 * maxEntries)) + 1
 }

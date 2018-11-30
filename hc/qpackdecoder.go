@@ -368,7 +368,9 @@ func (decoder *QpackDecoder) decodeLargestBase(lrRaw uint64) int {
 		largestReference -= fullRange
 	}
 	// Convert largestReference into largest base.
-	return int(largestReference) + 1
+	// Note that largestReference isn't a reference, it's the count of
+	// the number of inserts - which is the same as we use for largestBase.
+	return int(largestReference)
 }
 
 // readBase reads the header block header and blocks until the decoder is

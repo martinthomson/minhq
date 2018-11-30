@@ -131,8 +131,8 @@ func (decoder *QpackDecoder) readValueAndInsert(reader *Reader, name string) err
 	if tableOverhead+TableCapacity(len(name)+len(value)) > decoder.Table.Capacity() {
 		return ErrTableOverflow
 	}
-	decoder.logger.Printf("insert %v = %v", name, value)
 	added := decoder.Table.Insert(name, value, nil)
+	decoder.logger.Printf("inserted %v = %v @ %v", name, value, added.Base())
 	decoder.available <- added.Base()
 	return nil
 }
@@ -370,6 +370,7 @@ func (decoder *QpackDecoder) decodeLargestBase(lrRaw uint64) int {
 	// Convert largestReference into largest base.
 	// Note that largestReference isn't a reference, it's the count of
 	// the number of inserts - which is the same as we use for largestBase.
+	decoder.logger.Printf("largest reference %v", largestReference)
 	return int(largestReference)
 }
 
@@ -381,6 +382,7 @@ func (decoder *QpackDecoder) readBase(reader *Reader) (int, int, error) {
 		return 0, 0, err
 	}
 	largestBase := decoder.decodeLargestBase(lrRaw)
+	decoder.logger.Printf("wait for %v", largestBase)
 	// This blocks until the dynamic table is ready.
 	decoder.table.WaitForEntry(largestBase)
 

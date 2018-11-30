@@ -16,14 +16,17 @@ var logbuf bytes.Buffer
 func usage() {
 	msg := "Usage: %s <cmd> [args]\n\n" +
 		"Encode from a QIF file:\n" +
-		"    ... encode [-a] [-b blocked] [-t cap] [-r cap] [in [out]]\n\n" +
+		"    ... encode [-a] [-b blocked] [-t cap] [-r cap] [-v] [in [out]]\n\n" +
 		"    -a    Treat every block as immediately acknowledged\n" +
 		"    -b    Set the number of blocked streams\n" +
 		"    -t    Set the capacity of the table\n" +
-		"    -r    Set the referenceable capacity (must be after -t)\n\n" +
+		"    -r    Set the referenceable capacity (must be after -t)\n" +
+		"    -v    Verbose logging\n\n" +
 		"Decode from a QIF file:\n" +
-		"    ... decode [in [out]]\n" +
-		"    -t    Set the capacity of the table\n\n"
+		"    ... decode [-a] [-t cap] [-v] [in [out]]\n" +
+		"    -a    Enable asynchronous decoding\n" +
+		"    -t    Set the capacity of the table\n" +
+		"    -v    Verbose logging\n\n"
 	fmt.Fprintf(os.Stderr, msg, os.Args[0])
 	os.Exit(2)
 }
@@ -40,7 +43,9 @@ func check(err error) {
 	}
 }
 
-func encode(logger *log.Logger, args []string) {
+func encode(args []string) {
+	logger := log.New(&devnull, "", log.Lmicroseconds|log.Lshortfile)
+
 	ack := false
 	capacity := hc.TableCapacity(4096)
 	referenceable := hc.TableCapacity(4096)
@@ -49,21 +54,21 @@ func encode(logger *log.Logger, args []string) {
 		if args[0] == "-a" {
 			ack = true
 			args = args[1:]
-		}
-		if len(args) >= 2 && args[0] == "-b" {
+		} else if args[0] == "-v" {
+			logger = log.New(os.Stderr, "", log.Lmicroseconds|log.Lshortfile)
+			args = args[1:]
+		} else if len(args) >= 2 && args[0] == "-b" {
 			sz, err := strconv.Atoi(args[1])
 			check(err)
 			maxBlocked = sz
 			args = args[2:]
-		}
-		if len(args) >= 2 && args[0] == "-t" {
+		} else if len(args) >= 2 && args[0] == "-t" {
 			sz, err := strconv.Atoi(args[1])
 			check(err)
 			capacity = hc.TableCapacity(sz)
 			referenceable = capacity
 			args = args[2:]
-		}
-		if len(args) >= 2 && args[0] == "-r" {
+		} else if len(args) >= 2 && args[0] == "-r" {
 			sz, err := strconv.Atoi(args[1])
 			check(err)
 			referenceable = hc.TableCapacity(sz)
@@ -88,11 +93,20 @@ func encode(logger *log.Logger, args []string) {
 	enc.Encode(logger)
 }
 
-func decode(logger *log.Logger, args []string) {
+func decode(args []string) {
+	logger := log.New(&devnull, "", log.Lmicroseconds|log.Lshortfile)
+
 	var dec *decoder
+	async := false
 	capacity := hc.TableCapacity(4096)
 	for len(args) > 1 && args[0][0:1] == "-" {
-		if len(args) >= 2 && args[0] == "-t" {
+		if args[0] == "-a" {
+			async = true
+			args = args[1:]
+		} else if args[0] == "-v" {
+			logger = log.New(os.Stderr, "", log.Lmicroseconds|log.Lshortfile)
+			args = args[1:]
+		} else if len(args) >= 2 && args[0] == "-t" {
 			sz, err := strconv.Atoi(args[1])
 			check(err)
 			capacity = hc.TableCapacity(sz)
@@ -109,7 +123,11 @@ func decode(logger *log.Logger, args []string) {
 	}
 	defer dec.Close()
 	dec.qpack.Table.SetCapacity(capacity)
-	dec.Decode(logger)
+	if async {
+		dec.DecodeAsync(logger)
+	} else {
+		dec.Decode(logger)
+	}
 }
 
 func main() {
@@ -117,14 +135,12 @@ func main() {
 		usage()
 	}
 
-	logger := log.New(&logbuf, "", log.Lmicroseconds|log.Lshortfile)
-
 	switch os.Args[1] {
 	case "encode":
-		encode(logger, os.Args[2:])
+		encode(os.Args[2:])
 
 	case "decode":
-		decode(logger, os.Args[2:])
+		decode(os.Args[2:])
 
 	default:
 		usage()

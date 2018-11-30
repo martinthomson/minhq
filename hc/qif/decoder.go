@@ -6,6 +6,8 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
+	"sync"
 
 	"github.com/martinthomson/minhq/hc"
 	hqio "github.com/martinthomson/minhq/io"
@@ -21,17 +23,19 @@ type decoder struct {
 	qpack  *hc.QpackDecoder
 }
 
-type devnull struct{}
+type ioSink struct{}
 
 // Write just throws bytes away, reporting success.
-func (devnull *devnull) Write(p []byte) (int, error) {
+func (sink *ioSink) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
 // Close does nothing.
-func (devnull *devnull) Close() error {
+func (sink *ioSink) Close() error {
 	return nil
 }
+
+var devnull ioSink
 
 func newDecoder(inputName string, outputName string) *decoder {
 	dec := new(decoder)
@@ -59,7 +63,7 @@ func newDecoder(inputName string, outputName string) *decoder {
 
 	dec.input = hqio.NewBitReader(dec.inputFile)
 	dec.output = dec.outputFile
-	dec.qpack = hc.NewQpackDecoder(&devnull{}, 4096)
+	dec.qpack = hc.NewQpackDecoder(&devnull, 4096)
 	return dec
 }
 
@@ -95,7 +99,7 @@ func (dec *decoder) Decode(logger *log.Logger) {
 	for {
 		stream, reader, err := dec.readBlock()
 		if err == io.EOF {
-			return // Done!
+			break // Done!
 		}
 		check(err)
 
@@ -113,6 +117,81 @@ func (dec *decoder) Decode(logger *log.Logger) {
 			check(err)
 			dec.writeBlock(headers)
 		}
+	}
+}
+
+func (dec *decoder) DecodeAsync(logger *log.Logger) {
+	dec.qpack.SetLogger(logger)
+
+	// Setup the update stream.
+	updateStream := hqio.NewConcatenatingReader()
+	go func() {
+		logger.Println("Reading table updates")
+		check(dec.qpack.ReadTableUpdates(updateStream))
+	}()
+
+	// This is gross, and it's all Alan's fault.
+	// Not only does this need to be asynchronous, it also needs to sort the final
+	// results based on stream ID.
+	// This block receives results as they arrive, stores them, then feeds them
+	// to the sorted channel when everything is done.
+	type result struct {
+		stream  uint64
+		headers []hc.HeaderField
+	}
+	results := make(chan *result)
+	sorted := make(chan *result)
+	go func(output <-chan *result, sorted chan<- *result) {
+		var allResults []*result
+		for res := range results {
+			allResults = append(allResults, res)
+		}
+		sort.Slice(allResults, func(i int, j int) bool {
+			return allResults[i].stream < allResults[j].stream
+		})
+		for _, res := range allResults {
+			sorted <- res
+		}
+		close(sorted)
+	}(results, sorted)
+
+	var wg sync.WaitGroup
+	for {
+		stream, reader, err := dec.readBlock()
+		if err == io.EOF {
+			break // Done!
+		}
+		check(err)
+
+		var block bytes.Buffer
+		_, err = io.Copy(&block, reader)
+		check(err)
+		logger.Printf("%x [%d] %x\n", stream, block.Len(), block.Bytes())
+		reader = &block
+
+		// Process header table updates on this thread.
+		if stream == 0 {
+			updateStream.AddReader(reader)
+			continue
+		}
+
+		// Spawn goroutines for all header blocks, because
+		// those might need to wait for headers to arrive.
+		wg.Add(1)
+		go func(stream uint64, reader io.Reader) {
+			defer wg.Done()
+			logger.Println("stream", stream)
+			headers, err := dec.qpack.ReadHeaderBlock(reader, stream)
+			check(err)
+			results <- &result{stream, headers}
+		}(stream, reader)
+	}
+
+	updateStream.Close()
+	wg.Wait()
+	close(results)
+	for res := range sorted {
+		dec.writeBlock(res.headers)
 	}
 }
 
